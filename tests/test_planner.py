@@ -83,7 +83,7 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
             self.content = [FakeContentBlock(text)]
 
     class FakeMessages:
-        def create(self, *, model, max_tokens, messages, system=None):
+        def create(self, *, model, max_tokens, messages, system=None, timeout=None):
             captured["model"] = model
             captured["max_tokens"] = max_tokens
             captured["messages"] = messages

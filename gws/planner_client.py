@@ -17,5 +17,5 @@ def build_planner_client(settings: Settings) -> PlannerClient:
     if provider == "anthropic":
         from .providers.anthropic import AnthropicPlannerClient
 
-        return AnthropicPlannerClient(api_key=settings.planner_api_key, model=settings.planner_model)
+        return AnthropicPlannerClient(api_key=settings.planner_api_key, model=settings.planner_model, timeout=settings.planner_timeout)
     raise ValueError(f"unsupported planner provider: {provider}")
