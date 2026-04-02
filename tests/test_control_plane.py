@@ -4,7 +4,113 @@ import pytest
 from sqlalchemy.exc import IntegrityError, StatementError
 
 from gws.control_plane import ControlPlaneService
-from gws.models import Attempt, AttemptResultStatus, Case, IntentVersion, Lease, Step, StepStatus, Verdict, VerdictResult
+from gws.models import (
+    Attempt,
+    AttemptResultStatus,
+    Case,
+    IntentVersion,
+    Lease,
+    Outcome,
+    OutcomeEvent,
+    OutcomePhase,
+    OutcomeResult,
+    Step,
+    StepStatus,
+    Verdict,
+    VerdictResult,
+    WorkItem,
+    WorkItemStatus,
+)
+
+
+def _outcome_with_work_item(session, *, allowed_paths=None, forbidden_paths=None):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+        allowed_paths=allowed_paths or ["services/**"],
+        forbidden_paths=forbidden_paths or [],
+        base_commit="abc123",
+    )
+    session.add_all([intent, outcome, work_item])
+    session.commit()
+    return outcome, work_item
+
+
+def test_issue_lease_for_work_item_marks_outcome_running_and_creates_attempt(session):
+    outcome, work_item = _outcome_with_work_item(session)
+
+    service = ControlPlaneService(session)
+    lease = service.issue_lease(work_item_id=work_item.id, worker_id="worker-1", ttl_seconds=60)
+    session.refresh(work_item)
+    session.refresh(outcome)
+
+    attempt = session.query(Attempt).filter_by(lease_id=lease.id).one()
+
+    assert lease.work_item_id == work_item.id
+    assert lease.step_id is None
+    assert work_item.status is WorkItemStatus.LEASED
+    assert outcome.phase is OutcomePhase.RUNNING
+    assert outcome.current_work_item_id == work_item.id
+    assert attempt.work_item_id == work_item.id
+    assert attempt.step_id is None
+    assert attempt.result_status is AttemptResultStatus.PENDING
+
+
+def test_apply_attempt_completion_marks_outcome_completed_on_success(session):
+    outcome, work_item = _outcome_with_work_item(session)
+
+    service = ControlPlaneService(session)
+    service.issue_lease(work_item_id=work_item.id, worker_id="worker-1", ttl_seconds=60)
+
+    service.apply_attempt_completion(
+        work_item_id=work_item.id,
+        worker_id="worker-1",
+        touched_paths=["services/music/player.py"],
+        changed_hunks=["+return play(queue)"],
+    )
+
+    session.refresh(work_item)
+    session.refresh(outcome)
+
+    assert work_item.status is WorkItemStatus.SUCCEEDED
+    assert outcome.phase is OutcomePhase.COMPLETED
+    assert outcome.result is OutcomeResult.SUCCEEDED
+    assert outcome.result_summary == "execute completed successfully"
+    assert session.query(OutcomeEvent).filter_by(event_type="outcome_completed").count() == 1
+
+
+def test_extend_lease_records_outcome_event(session):
+    outcome, work_item = _outcome_with_work_item(session)
+
+    service = ControlPlaneService(session)
+    lease = service.issue_lease(work_item_id=work_item.id, worker_id="worker-1", ttl_seconds=60)
+    original_deadline = lease.heartbeat_deadline
+
+    extended = service.extend_lease(
+        lease_id=lease.id,
+        worker_id="worker-1",
+        ttl_seconds=120,
+        reason="close to finishing validation",
+    )
+
+    session.refresh(outcome)
+    events = session.query(OutcomeEvent).filter_by(outcome_id=outcome.id, event_type="lease_extended").all()
+
+    assert extended.heartbeat_deadline == original_deadline + timedelta(seconds=120)
+    assert extended.expires_at == extended.heartbeat_deadline
+    assert len(events) == 1
+    assert events[0].payload == {
+        "lease_id": lease.id,
+        "worker_id": "worker-1",
+        "ttl_seconds": 120,
+        "reason": "close to finishing validation",
+    }
 
 
 def test_issue_lease_creates_required_lease_attempt_and_verdict_foundation(session):
@@ -173,13 +279,15 @@ def test_heartbeat_rejects_non_positive_ttl_and_attempt_status_rejects_invalid_v
 
 
 def test_active_lease_index_declares_sqlite_and_postgres_partial_predicates():
-    active_lease_index = next(index for index in Lease.__table__.indexes if index.name == "uq_leases_active_step_id")
+    active_step_index = next(index for index in Lease.__table__.indexes if index.name == "uq_leases_active_step_id")
+    active_work_item_index = next(index for index in Lease.__table__.indexes if index.name == "uq_leases_active_work_item_id")
 
-    sqlite_where = active_lease_index.dialect_options["sqlite"].get("where")
-    postgresql_where = active_lease_index.dialect_options["postgresql"].get("where")
+    for index in (active_step_index, active_work_item_index):
+        sqlite_where = index.dialect_options["sqlite"].get("where")
+        postgresql_where = index.dialect_options["postgresql"].get("where")
 
-    assert str(sqlite_where) == "expired_at IS NULL"
-    assert str(postgresql_where) == "expired_at IS NULL"
+        assert str(sqlite_where) == "expired_at IS NULL"
+        assert str(postgresql_where) == "expired_at IS NULL"
 
 
 def test_apply_completed_diff_deduplicates_existing_review_step(session):

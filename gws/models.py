@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import weakref
 
-from sqlalchemy import DateTime, Enum, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, event, inspect, text
+from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, event, inspect, text
 from sqlalchemy.ext.mutable import Mutable, MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -400,6 +400,8 @@ class WorkItem(Base):
         back_populates="blocked_by_work_item",
         overlaps="outcome,work_items",
     )
+    leases: Mapped[list["Lease"]] = relationship(back_populates="work_item")
+    attempts: Mapped[list["Attempt"]] = relationship(back_populates="work_item")
 
 
 class OutcomeEvent(Base):
@@ -546,6 +548,10 @@ class Step(Base):
 class Lease(Base):
     __tablename__ = "leases"
     __table_args__ = (
+        CheckConstraint(
+            "(step_id IS NOT NULL AND work_item_id IS NULL) OR (step_id IS NULL AND work_item_id IS NOT NULL)",
+            name="ck_leases_exactly_one_target",
+        ),
         Index(
             "uq_leases_active_step_id",
             "step_id",
@@ -553,10 +559,18 @@ class Lease(Base):
             postgresql_where=text("expired_at IS NULL"),
             sqlite_where=text("expired_at IS NULL"),
         ),
+        Index(
+            "uq_leases_active_work_item_id",
+            "work_item_id",
+            unique=True,
+            postgresql_where=text("expired_at IS NULL"),
+            sqlite_where=text("expired_at IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    step_id: Mapped[int] = mapped_column(ForeignKey("steps.id"), index=True)
+    step_id: Mapped[Optional[int]] = mapped_column(ForeignKey("steps.id"), index=True, nullable=True)
+    work_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("work_items.id"), index=True, nullable=True)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
@@ -565,15 +579,23 @@ class Lease(Base):
     expired_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     base_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     step: Mapped[Step] = relationship(back_populates="leases")
+    work_item: Mapped[Optional["WorkItem"]] = relationship(back_populates="leases")
     attempt: Mapped[Optional["Attempt"]] = relationship(back_populates="lease", uselist=False)
 
 
 class Attempt(Base):
     __tablename__ = "attempts"
-    __table_args__ = (UniqueConstraint("lease_id", name="uq_attempts_lease_id"),)
+    __table_args__ = (
+        UniqueConstraint("lease_id", name="uq_attempts_lease_id"),
+        CheckConstraint(
+            "(step_id IS NOT NULL AND work_item_id IS NULL) OR (step_id IS NULL AND work_item_id IS NOT NULL)",
+            name="ck_attempts_exactly_one_target",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    step_id: Mapped[int] = mapped_column(ForeignKey("steps.id"), index=True)
+    step_id: Mapped[Optional[int]] = mapped_column(ForeignKey("steps.id"), index=True, nullable=True)
+    work_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("work_items.id"), index=True, nullable=True)
     lease_id: Mapped[int] = mapped_column(ForeignKey("leases.id"), nullable=False)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     repo: Mapped[str] = mapped_column(String(255), index=True)
@@ -590,7 +612,8 @@ class Attempt(Base):
     artifact_refs: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     submitted_diff_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    step: Mapped[Step] = relationship(back_populates="attempts")
+    step: Mapped[Optional[Step]] = relationship(back_populates="attempts")
+    work_item: Mapped[Optional["WorkItem"]] = relationship(back_populates="attempts")
     lease: Mapped[Lease] = relationship(back_populates="attempt")
     verdicts: Mapped[list["Verdict"]] = relationship(back_populates="attempt")
 

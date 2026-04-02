@@ -1,10 +1,11 @@
 from fastapi.testclient import TestClient
 
 from gws.api import create_app
+from gws.coordinator import PlanningCoordinator
 from gws.config import Settings
 from gws.control_plane import ControlPlaneService
 from gws.db import Base, make_session_factory
-from gws.models import Case, IntentVersion, Step, StepStatus, Verdict
+from gws.models import Case, IntentVersion, Outcome, OutcomePhase, OutcomeResult, Step, StepStatus, Verdict
 
 
 def auth_headers(token: str) -> dict[str, str]:
@@ -183,6 +184,61 @@ def test_full_flow_intent_to_step_completion(session):
     )
     session.refresh(step)
     assert step.status == StepStatus.SUCCEEDED
+
+
+def test_full_flow_intent_to_outcome_completion(session):
+    intent = IntentVersion(
+        intent_id="game-2",
+        intent_version=1,
+        brief_text="Build a browser platformer",
+        context="HTML/CSS/JS output. Pixel art style.",
+        planner_guidance="Core loop before polish.",
+    )
+    session.add(intent)
+    session.commit()
+
+    class MockPlanner:
+        def synthesize(self, *, brief, lane, repo_heads, envelope, **kwargs):
+            assert "lane_capabilities" in kwargs or kwargs.get("lane_capabilities") is None
+            return {
+                "title": "Build player movement",
+                "goal": "Implement WASD controls",
+                "repo": "studio-ystackai",
+                "allowed_paths": ["src/**"],
+                "forbidden_paths": [],
+                "step_type": "execute",
+            }
+
+    coordinator = PlanningCoordinator(
+        session,
+        planner_client=MockPlanner(),
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        lane_capabilities={"coder": "Write game code."},
+    )
+    outcome, work_item = coordinator.plan_outcome(
+        intent_id="game-2",
+        worker_id="coder1",
+        lane="coder",
+        available_repos=["studio-ystackai"],
+        repo_heads={"studio-ystackai": "abc123"},
+    )
+    assert outcome.phase == OutcomePhase.READY
+
+    service = ControlPlaneService(session)
+    service.issue_lease(work_item_id=work_item.id, worker_id="coder1", ttl_seconds=900)
+
+    service.apply_attempt_completion(
+        work_item_id=work_item.id,
+        worker_id="coder1",
+        touched_paths=["src/player.js"],
+        changed_hunks=["+ function move() {}"],
+    )
+    session.refresh(outcome)
+
+    assert outcome.phase is OutcomePhase.COMPLETED
+    assert outcome.result is OutcomeResult.SUCCEEDED
+    assert session.query(Verdict).count() == 1
 
 
 def test_completed_diff_rejects_non_owner_worker_via_api(tmp_path, worker_registry_path):
