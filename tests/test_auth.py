@@ -35,3 +35,36 @@ def test_authenticate_worker_accepts_valid_bearer_token(worker_registry_path):
     assert worker.worker_id == "coder-1"
     assert worker.lane == "coder"
     assert list(worker.repo_access_set) == ["repo-a", "repo-b"]
+
+
+def test_authenticate_worker_accepts_lowercase_bearer_scheme(worker_registry_path):
+    registry = WorkerRegistry.from_file(str(worker_registry_path))
+
+    worker = authenticate_worker(registry, "bearer token-coder-1")
+
+    assert worker.worker_id == "coder-1"
+    assert worker.lane == "coder"
+    assert list(worker.repo_access_set) == ["repo-a", "repo-b"]
+
+
+def test_worker_registry_rejects_malformed_root(worker_registry_path, tmp_path):
+    path = tmp_path / "bad-workers-root.yaml"
+    path.write_text("- token: token-coder-1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="workers registry root must be a mapping"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_workers_missing_required_keys(tmp_path):
+    path = tmp_path / "bad-workers-missing-keys.yaml"
+    path.write_text(
+        """workers:
+  - token: token-coder-1
+    worker_id: coder-1
+    lane: coder
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="missing required worker keys: repo_access_set"):
+        WorkerRegistry.from_file(str(path))

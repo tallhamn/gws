@@ -27,8 +27,25 @@ class WorkerRegistry:
         with registry_path.open(encoding="utf-8") as fh:
             data = yaml.safe_load(fh) or {}
 
+        if not isinstance(data, dict):
+            raise ValueError("workers registry root must be a mapping")
+
+        raw_workers = data.get("workers", [])
+        if raw_workers is None:
+            raw_workers = []
+        if not isinstance(raw_workers, list):
+            raise ValueError("workers registry workers entry must be a list")
+
         workers_by_token: dict[str, WorkerIdentity] = {}
-        for raw_worker in data.get("workers", []):
+        required_keys = {"token", "worker_id", "lane", "repo_access_set"}
+        for raw_worker in raw_workers:
+            if not isinstance(raw_worker, dict):
+                raise ValueError("each worker entry must be a mapping")
+
+            missing_keys = sorted(required_keys - raw_worker.keys())
+            if missing_keys:
+                raise ValueError(f"missing required worker keys: {', '.join(missing_keys)}")
+
             token = raw_worker["token"]
             if token in workers_by_token:
                 raise ValueError(f"duplicate worker token: {token}")
@@ -47,13 +64,20 @@ def authenticate_worker(
     registry: WorkerRegistry,
     authorization: str | None,
 ) -> WorkerIdentity:
-    if authorization is None or not authorization.startswith("Bearer "):
+    if authorization is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Missing or invalid authorization header",
         )
 
-    token = authorization.removeprefix("Bearer ").strip()
+    scheme, sep, token = authorization.partition(" ")
+    if sep == "" or scheme.lower() != "bearer" or not token.strip():
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing or invalid authorization header",
+        )
+
+    token = token.strip()
     worker = registry.get_by_token(token)
     if worker is None:
         raise HTTPException(
