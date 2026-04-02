@@ -1,24 +1,23 @@
 from __future__ import annotations
 
+import json
 import logging
 from datetime import datetime, timezone
-import json
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import AmendmentProposal, Case, IntentVersion, Step, StepStatus
+from .models import AmendmentProposal, IntentVersion, Outcome, WorkItem, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
 
 class AmendmentService:
-    OPEN_STEP_STATUSES = {
-        StepStatus.PLANNING,
-        StepStatus.READY,
-        StepStatus.LEASED,
-        StepStatus.RUNNING,
-        StepStatus.VERIFYING,
+    OPEN_WORK_ITEM_STATUSES = {
+        WorkItemStatus.READY,
+        WorkItemStatus.LEASED,
+        WorkItemStatus.RUNNING,
+        WorkItemStatus.VERIFYING,
     }
 
     def __init__(self, session: Session):
@@ -68,7 +67,7 @@ class AmendmentService:
         self.session.add(new_intent)
 
         if proposal.is_breaking:
-            self._revoke_open_steps(prior_intent.intent_id, prior_intent.intent_version)
+            self._revoke_open_work_items(prior_intent.intent_id, prior_intent.intent_version)
 
         proposal.status = "accepted"
         proposal.accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -79,20 +78,31 @@ class AmendmentService:
             self.session.rollback()
             logger.warning("Proposal %d acceptance failed: base intent version is stale", proposal_id)
             raise ValueError("proposal base intent version is stale") from exc
-        logger.info("Amendment proposal %d accepted, intent %s v%d -> v%d", proposal_id, prior_intent.intent_id, prior_intent.intent_version, new_intent.intent_version)
+        logger.info(
+            "Amendment proposal %d accepted, intent %s v%d -> v%d",
+            proposal_id,
+            prior_intent.intent_id,
+            prior_intent.intent_version,
+            new_intent.intent_version,
+        )
         return new_intent
 
-    def _revoke_open_steps(self, intent_id: str, intent_version: int) -> None:
-        steps = (
-            self.session.query(Step)
-            .join(Case)
+    def _revoke_open_work_items(self, intent_id: str, intent_version: int) -> None:
+        work_items = (
+            self.session.query(WorkItem)
+            .join(Outcome, WorkItem.outcome_id == Outcome.id)
             .filter(
-                Case.intent_id == intent_id,
-                Case.intent_version == intent_version,
-                Step.status.in_(self.OPEN_STEP_STATUSES),
+                Outcome.intent_id == intent_id,
+                Outcome.intent_version == intent_version,
+                WorkItem.status.in_(self.OPEN_WORK_ITEM_STATUSES),
             )
             .all()
         )
-        for step in steps:
-            step.status = StepStatus.REVOKED
-        logger.info("Breaking amendment: revoked %d open steps for intent %s v%d", len(steps), intent_id, intent_version)
+        for work_item in work_items:
+            work_item.status = WorkItemStatus.REVOKED
+        logger.info(
+            "Breaking amendment: revoked %d open work items for intent %s v%d",
+            len(work_items),
+            intent_id,
+            intent_version,
+        )
