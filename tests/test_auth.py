@@ -55,6 +55,36 @@ def test_worker_registry_rejects_malformed_root(worker_registry_path, tmp_path):
         WorkerRegistry.from_file(str(path))
 
 
+@pytest.mark.parametrize("root_text", ["[]\n", "false\n", "0\n", '""\n'])
+def test_worker_registry_rejects_falsy_malformed_roots(root_text, tmp_path):
+    path = tmp_path / "bad-workers-falsy-root.yaml"
+    path.write_text(root_text, encoding="utf-8")
+
+    with pytest.raises(ValueError, match="workers registry root must be a mapping"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_workers_entry_that_is_not_a_list(tmp_path):
+    path = tmp_path / "bad-workers-not-a-list.yaml"
+    path.write_text("workers: token-coder-1\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="workers registry workers entry must be a list"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_worker_entry_that_is_not_a_mapping(tmp_path):
+    path = tmp_path / "bad-worker-entry-not-mapping.yaml"
+    path.write_text(
+        """workers:
+  - token-coder-1
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="each worker entry must be a mapping"):
+        WorkerRegistry.from_file(str(path))
+
+
 def test_worker_registry_rejects_workers_missing_required_keys(tmp_path):
     path = tmp_path / "bad-workers-missing-keys.yaml"
     path.write_text(

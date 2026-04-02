@@ -25,7 +25,10 @@ class WorkerRegistry:
             registry_path = Path(__file__).resolve().parent.parent / registry_path
 
         with registry_path.open(encoding="utf-8") as fh:
-            data = yaml.safe_load(fh) or {}
+            data = yaml.safe_load(fh)
+
+        if data is None:
+            data = {}
 
         if not isinstance(data, dict):
             raise ValueError("workers registry root must be a mapping")
