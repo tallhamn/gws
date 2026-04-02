@@ -4,7 +4,7 @@ from fastapi.testclient import TestClient
 
 from gws.api import create_app
 from gws.config import Settings
-from gws.db import Base, make_session_factory
+from gws.db import Base, make_engine, make_session_factory
 from gws.models import (
     Attempt,
     AttemptResultStatus,
@@ -166,6 +166,20 @@ def test_public_timeline_returns_404_for_unknown_intent(tmp_path):
 
     assert response.status_code == 404
     assert response.json() == {"detail": "Intent not found"}
+
+
+def test_non_timeline_public_routes_still_require_api_key(tmp_path):
+    database_path = tmp_path / "timeline-api-key.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/not-a-route")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
 
 
 def test_public_timeline_returns_quiet_now_building_when_no_active_lease(tmp_path):
