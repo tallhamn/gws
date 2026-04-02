@@ -24,8 +24,6 @@ class ControlPlaneService:
         step = self.session.get(Step, step_id)
         if step is None:
             raise ValueError(f"unknown step_id: {step_id}")
-        if step.status in {StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.REVOKED}:
-            return
 
         active_lease = (
             self.session.query(Lease)
@@ -33,6 +31,14 @@ class ControlPlaneService:
             .order_by(Lease.id.desc())
             .first()
         )
+
+        if step.status in {StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.REVOKED}:
+            if active_lease is None or active_lease.heartbeat_deadline <= datetime.utcnow():
+                return
+            if active_lease.worker_id != worker_id:
+                raise PermissionError("step lease belongs to another worker")
+            return
+
         if active_lease is None or active_lease.heartbeat_deadline <= datetime.utcnow():
             raise ValueError("step has no active lease")
         if active_lease.worker_id != worker_id:
