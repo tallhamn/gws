@@ -18,7 +18,7 @@ def test_synthesize_includes_lane_capabilities_in_prompt():
         "repo": "studio-ystackai",
         "allowed_paths": ["src/**"],
         "forbidden_paths": [],
-        "step_type": "execute",
+        "work_type": "execute",
     }))]
     mock_anthropic.messages.create.return_value = mock_response
     client.client = mock_anthropic
@@ -35,6 +35,8 @@ def test_synthesize_includes_lane_capabilities_in_prompt():
 
     call_kwargs = mock_anthropic.messages.create.call_args[1]
     system_prompt = call_kwargs["system"]
+    assert "work_type" in system_prompt
+    assert "step_type" not in system_prompt
     assert "Write game code." in system_prompt
     assert "Create visual assets." in system_prompt
     assert "Browser game. HTML/CSS/JS." in system_prompt
@@ -55,7 +57,7 @@ def test_synthesize_works_without_optional_context():
         "repo": "repo-a",
         "allowed_paths": ["**"],
         "forbidden_paths": [],
-        "step_type": "execute",
+        "work_type": "execute",
     }))]
     mock_anthropic.messages.create.return_value = mock_response
     client.client = mock_anthropic

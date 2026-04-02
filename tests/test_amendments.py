@@ -1,7 +1,13 @@
 from sqlalchemy.exc import IntegrityError
 
 from gws.amendments import AmendmentService
-from gws.models import AmendmentProposal, Case, IntentVersion, Step, StepStatus
+from gws.models import AmendmentProposal, IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+
+
+def test_amendment_service_imports_without_legacy_step_models():
+    from gws.amendments import AmendmentService as ImportedService
+
+    assert ImportedService is AmendmentService
 
 
 def test_breaking_amendment_creates_intent_version_plus_one(session):
@@ -22,15 +28,48 @@ def test_breaking_amendment_creates_intent_version_plus_one(session):
     assert accepted_intent.brief_text == "ship /music and /podcasts"
 
 
-def test_breaking_amendment_revokes_open_steps_for_prior_intent_version(session):
+def test_breaking_amendment_revokes_open_work_items_for_prior_intent_version(session):
     prior_intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    current_case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    open_step = Step(case=current_case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-    succeeded_step = Step(case=current_case, repo="repo-a", lane="coder", step_type="verify", status=StepStatus.SUCCEEDED)
+    current_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    open_work_item = WorkItem(
+        outcome=current_outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    succeeded_work_item = WorkItem(
+        outcome=current_outcome,
+        sequence_index=1,
+        repo="repo-a",
+        lane="ci",
+        work_type="review",
+        status=WorkItemStatus.SUCCEEDED,
+    )
 
     other_intent = IntentVersion(intent_id="intent-2", intent_version=1, brief_text="ship /video")
-    other_case = Case(intent_id="intent-2", intent_version=1, title="Create /video", goal="Implement /video")
-    other_step = Step(case=other_case, repo="repo-b", lane="coder", step_type="execute", status=StepStatus.READY)
+    other_outcome = Outcome(
+        intent_id="intent-2",
+        intent_version=1,
+        title="Create /video",
+        goal="Implement /video",
+        phase=OutcomePhase.READY,
+    )
+    other_work_item = WorkItem(
+        outcome=other_outcome,
+        sequence_index=0,
+        repo="repo-b",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
 
     proposal = AmendmentProposal(
         intent_id="intent-1",
@@ -39,17 +78,28 @@ def test_breaking_amendment_revokes_open_steps_for_prior_intent_version(session)
         amended_brief_text="ship /podcasts",
         is_breaking=True,
     )
-    session.add_all([prior_intent, other_intent, current_case, other_case, open_step, succeeded_step, other_step, proposal])
+    session.add_all(
+        [
+            prior_intent,
+            other_intent,
+            current_outcome,
+            other_outcome,
+            open_work_item,
+            succeeded_work_item,
+            other_work_item,
+            proposal,
+        ]
+    )
     session.commit()
 
     AmendmentService(session).accept_proposal(proposal.id)
-    session.refresh(open_step)
-    session.refresh(succeeded_step)
-    session.refresh(other_step)
+    session.refresh(open_work_item)
+    session.refresh(succeeded_work_item)
+    session.refresh(other_work_item)
 
-    assert open_step.status is StepStatus.REVOKED
-    assert succeeded_step.status is StepStatus.SUCCEEDED
-    assert other_step.status is StepStatus.READY
+    assert open_work_item.status is WorkItemStatus.REVOKED
+    assert succeeded_work_item.status is WorkItemStatus.SUCCEEDED
+    assert other_work_item.status is WorkItemStatus.READY
 
 
 def test_accepted_amendments_records_summary_on_new_intent(session):

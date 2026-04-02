@@ -15,7 +15,7 @@ def test_claude_code_planner_client_invokes_cli_with_plan_mode(monkeypatch):
                     "repo": "repo-a",
                     "allowed_paths": ["src/**"],
                     "forbidden_paths": [],
-                    "step_type": "execute",
+                    "work_type": "execute",
                 }
             )
 
@@ -59,6 +59,9 @@ def test_claude_code_planner_client_invokes_cli_with_plan_mode(monkeypatch):
     assert "--effort" in captured["args"]
     assert "--system-prompt" in captured["args"]
     assert "--model" in captured["args"]
+    system_prompt = captured["args"][captured["args"].index("--system-prompt") + 1]
+    assert "work_type" in system_prompt
+    assert "step_type" not in system_prompt
 
 
 def test_claude_code_planner_client_reports_missing_binary(monkeypatch):

@@ -192,6 +192,12 @@ def test_public_timeline_returns_live_and_recent_events(tmp_path):
     data = response.json()
     assert data["intent"]["intent_id"] == "intent-vector-room"
     assert data["intent"]["intent_version"] == 1
+    assert data["outcome_progress"] == {
+        "total_outcomes": 3,
+        "completed_outcomes": 2,
+        "active_outcomes": 1,
+    }
+    assert "case_progress" not in data
     assert data["timeline_events"][0]["brief_teaser"] == "Build Vector Room"
     assert data["timeline_events"][0]["brief_text"] == "Build Vector Room\n\n- keep it compact"
     assert data["now_building"]["worker_id"] == "coder2"

@@ -8,27 +8,27 @@ GWS does not maintain a pre-expanded backlog of tickets. It holds a desired end 
 
 ## 2. Central Planning, Lease-Based Worker Pull
 
-The control plane owns the world model and planning logic. Workers do not self-assign arbitrary work; they pull work for a lane and receive a time-bounded lease on a ready step.
+The control plane owns the world model and planning logic. Workers do not self-assign arbitrary work; they pull work for a lane and receive a time-bounded lease on a ready work item.
 
 ## 3. Immutable Intent Versions
 
 Goals are versioned. Accepted amendments create a new `IntentVersion` instead of rewriting the brief in place. Open work is reconciled against the new version as `continue`, `revalidate`, `revoke`, or `superseded`.
 
-## 4. Cases And Steps
+## 4. Outcomes And Work Items
 
-An intent decomposes into durable `Case` objects. Each case contains repo-scoped `Step` objects that are the actual leaseable execution units. This keeps planning, execution, and governance legible.
+An intent version decomposes into durable `Outcome` records. Each outcome owns repo-scoped `WorkItem` records that are the actual leaseable execution units. This keeps planning, execution, and governance legible while preserving a clean separation between current state and event history.
 
 ## 5. Repo-Scoped Execution
 
-Each step executes against exactly one repo and one base commit. Cross-repo initiatives are handled by sequencing multiple repo-scoped steps rather than attempting atomic multi-repo execution.
+Each work item executes against exactly one repo and one base commit. Cross-repo initiatives are handled by sequencing multiple repo-scoped work items rather than attempting atomic multi-repo execution.
 
-## 6. Mostly Serial Workflows Within A Case
+## 6. Mostly Serial Workflows Within An Outcome
 
-A case may grow dynamically, but its internal flow stays constrained and mostly serial. Parallelism comes primarily from multiple independent cases, not from turning each case into a general-purpose workflow DAG.
+An outcome may grow dynamically, but its internal flow stays constrained and mostly serial. Parallelism comes primarily from multiple independent outcomes, not from turning each outcome into a general-purpose workflow DAG.
 
 ## 7. Deterministic Governance From Actual Diffs
 
-Governance is derived from the actual change, not from model-claimed intent. Runtime routing decisions use touched paths and changed hunk text. Structural contract violations fail hard; review triggers append new steps in the appropriate lane.
+Governance is derived from the actual change, not from model-claimed intent. Runtime routing decisions use touched paths and changed hunk text. Structural contract violations fail hard; review triggers append new work items in the appropriate lane.
 
 ## 8. Push Is Limited
 

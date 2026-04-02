@@ -2,7 +2,7 @@
 
 GWS is a control plane for mostly unattended software delivery. It holds a desired end state, observes current repo state, and synthesizes the next bounded unit of work only when a worker is ready to take it.
 
-At the macro level, GWS does pathfinding: choose the next waypoint toward the goal. At the micro level, workers do their own local planning to execute that waypoint. After each result is merged or rejected, GWS reevaluates from the new state and chooses the next step.
+At the macro level, GWS does pathfinding: choose the next outcome toward the goal. At the micro level, workers do their own local planning to execute the current work item. After each result is merged or rejected, GWS reevaluates from the new state and chooses the next work item.
 
 ## What GWS Is Not
 
@@ -44,9 +44,9 @@ The public execution contract is:
 - `POST /worker/leases/{lease_id}/heartbeat`
   - worker-token authenticated
   - extends a lease owned by the authenticated worker
-- `POST /worker/steps/{step_id}/complete`
+- `POST /worker/work-items/{work_item_id}/complete`
   - worker-token authenticated
-  - submits result metadata for the step leased to the authenticated worker
+  - submits result metadata for the work item leased to the authenticated worker
 
 `policy.yaml` defines lane capabilities and governance triggers. `workers.yaml` defines worker identities. Both are runtime-configurable through `GWS_POLICY_PATH` and `GWS_WORKERS_PATH`. Planning and completion verification use the same configured policy file.
 
