@@ -8,7 +8,7 @@ class Base(DeclarativeBase):
     pass
 
 
-def make_engine(database_url: str):
+def make_engine(database_url: str, *, pool_size: int = 10, pool_timeout: int = 30, pool_pre_ping: bool = True):
     url = make_url(database_url)
     engine_kwargs = {"future": True}
 
@@ -16,6 +16,10 @@ def make_engine(database_url: str):
         if url.database in {None, "", ":memory:"}:
             engine_kwargs["poolclass"] = StaticPool
             engine_kwargs["connect_args"] = {"check_same_thread": False}
+    else:
+        engine_kwargs["pool_size"] = pool_size
+        engine_kwargs["pool_timeout"] = pool_timeout
+        engine_kwargs["pool_pre_ping"] = pool_pre_ping
 
     engine = create_engine(database_url, **engine_kwargs)
 
@@ -31,6 +35,6 @@ def make_engine(database_url: str):
     return engine
 
 
-def make_session_factory(database_url: str):
-    engine = make_engine(database_url)
+def make_session_factory(database_url: str, *, pool_size: int = 10, pool_timeout: int = 30, pool_pre_ping: bool = True):
+    engine = make_engine(database_url, pool_size=pool_size, pool_timeout=pool_timeout, pool_pre_ping=pool_pre_ping)
     return sessionmaker(bind=engine, expire_on_commit=False, future=True), engine

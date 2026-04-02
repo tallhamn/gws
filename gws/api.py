@@ -32,7 +32,12 @@ class CompletedDiffIn(BaseModel):
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
-    session_factory, engine = make_session_factory(settings.database_url)
+    session_factory, engine = make_session_factory(
+        settings.database_url,
+        pool_size=settings.db_pool_size,
+        pool_timeout=settings.db_pool_timeout,
+        pool_pre_ping=settings.db_pool_pre_ping,
+    )
     Base.metadata.create_all(engine)
 
     if settings.api_key:
