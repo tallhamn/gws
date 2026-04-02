@@ -2,9 +2,19 @@ from __future__ import annotations
 
 import posixpath
 from fnmatch import fnmatch
+from pathlib import Path
 from types import SimpleNamespace
 
 from .policy import PolicyEngine
+
+_policy_cache: dict[str, PolicyEngine] = {}
+
+
+def _get_policy_engine(policy_path: str) -> PolicyEngine:
+    key = str(Path(policy_path).resolve()) if Path(policy_path).is_absolute() else policy_path
+    if key not in _policy_cache:
+        _policy_cache[key] = PolicyEngine.from_file(policy_path)
+    return _policy_cache[key]
 
 
 def verify_attempt(
@@ -52,7 +62,7 @@ def verify_attempt(
             reasons=["out_of_scope"],
         )
 
-    policy_verdict = PolicyEngine.from_file(policy_path).evaluate(
+    policy_verdict = _get_policy_engine(policy_path).evaluate(
         touched_paths=touched_paths,
         changed_hunks=changed_hunks,
     )
