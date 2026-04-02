@@ -71,9 +71,12 @@ def test_get_pull_request_returns_not_found_for_unknown_id(tmp_path):
     assert response.json() == {"detail": "Pull request not found"}
 
 
-def test_create_pull_request_ignores_client_supplied_status(tmp_path):
+def test_create_pull_request_ignores_client_supplied_status(tmp_path, worker_registry_path):
     database_path = tmp_path / "api.db"
-    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
     engine = make_engine(settings.database_url)
     Base.metadata.create_all(engine)
     app = create_app(settings)
@@ -82,6 +85,9 @@ def test_create_pull_request_ignores_client_supplied_status(tmp_path):
     create_response = client.post(
         "/pull-requests",
         json={
+            "worker_id": "spoofed-worker",
+            "lane": "spoofed-lane",
+            "repo_access_set": ["spoofed-repo"],
             "envelope": {"branch": "feature/ignore-status"},
             "status": "completed",
         },
@@ -90,6 +96,16 @@ def test_create_pull_request_ignores_client_supplied_status(tmp_path):
 
     assert create_response.status_code == 202
     assert create_response.json() == {"pull_request_id": 1}
+
+    session_factory, _ = make_session_factory(settings.database_url)
+    with session_factory() as session:
+        pull_request = session.get(PullRequest, 1)
+
+    assert pull_request is not None
+    assert pull_request.worker_id == "coder-1"
+    assert pull_request.lane == "coder"
+    assert list(pull_request.repo_access_set) == ["repo-a", "repo-b"]
+    assert pull_request.envelope == {"branch": "feature/ignore-status"}
 
     fetch_response = client.get("/pull-requests/1")
 
