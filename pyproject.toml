@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic"]
-dev = ["httpx", "pytest"]
+dev = ["httpx", "pytest", "pytest-asyncio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

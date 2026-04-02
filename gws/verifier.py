@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import posixpath
+from dataclasses import dataclass, field
 from fnmatch import fnmatch
 from pathlib import Path
 from types import SimpleNamespace
@@ -85,3 +86,40 @@ def verify_attempt(
         triggered_lanes=[],
         reasons=["clean"],
     )
+
+
+@dataclass
+class ArtifactVerdict:
+    passed: bool
+    results: list[dict] = field(default_factory=list)
+
+
+async def verify_artifacts(
+    *,
+    requirements: list[str],
+    gateway_url: str,
+    repo: str,
+    _gateway_call=None,
+) -> ArtifactVerdict:
+    if not requirements:
+        return ArtifactVerdict(passed=True, results=[])
+
+    results = []
+    for req in requirements:
+        if _gateway_call is not None:
+            resp = await _gateway_call(requirement=req, repo=repo)
+        else:
+            import aiohttp
+            async with aiohttp.ClientSession() as http_session:
+                async with http_session.post(
+                    f"{gateway_url}/verify",
+                    json={"requirement": req, "repo": repo},
+                    timeout=aiohttp.ClientTimeout(total=300),
+                ) as http_resp:
+                    resp = await http_resp.json()
+
+        passed = resp.get("exit_code", 1) == 0
+        results.append({"requirement": req, "passed": passed, "output": resp.get("output", "")})
+
+    all_passed = all(r["passed"] for r in results)
+    return ArtifactVerdict(passed=all_passed, results=results)

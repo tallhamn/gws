@@ -16,3 +16,4 @@ class Settings(BaseSettings):
     planner_model: Optional[str] = None
     planner_api_key: Optional[str] = None
     planner_timeout: float = 60.0
+    gateway_url: Optional[str] = None
