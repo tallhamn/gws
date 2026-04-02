@@ -47,3 +47,7 @@ class PolicyEngine:
                 lanes.add(rule["lane"])
 
         return PolicyVerdict(triggered_lanes=sorted(lanes))
+
+    def lane_capabilities(self) -> dict[str, str]:
+        lanes = self.data.get("lanes", {})
+        return {name: cfg.get("capabilities", "") for name, cfg in lanes.items()}
