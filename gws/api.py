@@ -32,6 +32,8 @@ class PullRequestResponse(BaseModel):
 class LeaseRequest(BaseModel):
     worker_id: str
     ttl_seconds: int = 60
+    repo_heads: dict[str, str] = Field(default_factory=dict)
+    intent_id: str | None = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -148,15 +150,54 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/lanes/{lane}/pull")
     def pull_step(lane: str, payload: LeaseRequest) -> dict:
         with session_factory() as session:
-            from .models import Step, StepStatus
+            from .models import IntentVersion, Step, StepStatus
+
+            # 1. Check for existing READY steps in this lane
             step = (
                 session.query(Step)
                 .filter(Step.lane == lane, Step.status == StepStatus.READY)
                 .order_by(Step.id)
                 .first()
             )
+
+            # 2. If none, try JIT planning from the latest intent
+            if step is None and payload.intent_id and payload.repo_heads:
+                intent = (
+                    session.query(IntentVersion)
+                    .filter(IntentVersion.intent_id == payload.intent_id)
+                    .order_by(IntentVersion.intent_version.desc())
+                    .first()
+                )
+                if intent is not None:
+                    from .planner import PlannerService
+                    from .planner_client import build_planner_client
+                    from .policy import PolicyEngine
+
+                    try:
+                        planner_client = build_planner_client(settings)
+                        policy = PolicyEngine.from_file("policy.yaml")
+                        planner_service = PlannerService(
+                            session, planner_client,
+                            lane_capabilities=policy.lane_capabilities(),
+                        )
+                        pr = PullRequest(
+                            worker_id=payload.worker_id,
+                            lane=lane,
+                            intent_id=payload.intent_id,
+                            repo_access_set=list(payload.repo_heads.keys()),
+                        )
+                        session.add(pr)
+                        session.commit()
+                        session.refresh(pr)
+                        _case, step = planner_service.plan_pull_request(pr.id, payload.repo_heads)
+                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, lane, payload.intent_id)
+                    except Exception as exc:
+                        logger.warning("JIT planning failed for lane %s: %s", lane, exc)
+                        step = None
+
             if step is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No ready steps in lane: {lane}")
+
             service = ControlPlaneService(session)
             try:
                 lease = service.issue_lease(step_id=step.id, worker_id=payload.worker_id, ttl_seconds=payload.ttl_seconds)
