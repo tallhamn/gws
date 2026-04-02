@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Protocol
 
 from .config import Settings
-from .providers.anthropic import AnthropicPlannerClient
 
 
 class PlannerClient(Protocol):
@@ -16,5 +15,7 @@ def build_planner_client(settings: Settings) -> PlannerClient:
     if not provider:
         raise ValueError("planner_provider is required")
     if provider == "anthropic":
+        from .providers.anthropic import AnthropicPlannerClient
+
         return AnthropicPlannerClient(api_key=settings.planner_api_key, model=settings.planner_model)
     raise ValueError(f"unsupported planner provider: {provider}")
