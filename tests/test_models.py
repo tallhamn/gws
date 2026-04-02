@@ -6,7 +6,21 @@ from sqlalchemy.exc import IntegrityError, StatementError
 from sqlalchemy.pool import StaticPool
 
 from gws.db import make_engine
-from gws.models import Case, IntentVersion, PullRequest, Step, StepStatus
+from gws.models import (
+    Case,
+    IntentVersion,
+    Outcome,
+    OutcomeEvent,
+    OutcomePhase,
+    OutcomeResult,
+    PlanningSession,
+    PlanningSessionStatus,
+    PullRequest,
+    Step,
+    StepStatus,
+    WorkItem,
+    WorkItemStatus,
+)
 
 
 def test_can_persist_intent_case_and_step(session):
@@ -274,6 +288,413 @@ def test_intent_version_context_defaults_empty(session):
     session.refresh(iv)
     assert iv.context == ""
     assert iv.planner_guidance == ""
+
+
+def test_outcome_records_explicit_phase_and_result(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.COMPLETED,
+        result=OutcomeResult.SUCCEEDED,
+        selected_repo="repo-a",
+        result_summary="Shipped /music endpoint",
+        result_commit="abc123",
+    )
+    session.add_all([intent, outcome])
+    session.commit()
+
+    stored = session.get(Outcome, outcome.id)
+    assert stored.phase is OutcomePhase.COMPLETED
+    assert stored.result is OutcomeResult.SUCCEEDED
+    assert stored.result_commit == "abc123"
+
+
+def test_planning_session_defaults_and_json_mutations_persist(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.PLANNING,
+    )
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="planner-1",
+        lane="planner",
+        planner_provider="claude_code",
+    )
+    planning.available_repos.append("repo-a")
+    planning.repo_heads["repo-a"] = "abc123"
+    planning.planning_context["intent"] = {"id": "intent-1"}
+    planning.plan_payload["work_items"] = [{"repo": "repo-a"}]
+
+    session.add_all([intent, outcome, planning])
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(PlanningSession, planning.id)
+    assert stored.status is PlanningSessionStatus.PENDING
+    assert stored.available_repos == ["repo-a"]
+    assert stored.repo_heads == {"repo-a": "abc123"}
+    assert stored.planning_context == {"intent": {"id": "intent-1"}}
+    assert stored.plan_payload == {"work_items": [{"repo": "repo-a"}]}
+
+
+def test_work_item_supports_sequence_and_dependency(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    first = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    session.add_all([intent, outcome, first])
+    session.flush()
+
+    second = WorkItem(
+        outcome=outcome,
+        sequence_index=1,
+        blocked_by_work_item_id=first.id,
+        repo="repo-a",
+        lane="ci",
+        work_type="review",
+        status=WorkItemStatus.READY,
+    )
+    session.add(second)
+    session.commit()
+
+    stored = session.get(WorkItem, second.id)
+    assert stored.sequence_index == 1
+    assert stored.blocked_by_work_item_id == first.id
+
+
+def test_work_item_dependency_relationship_round_trips(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    upstream = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    downstream = WorkItem(
+        outcome=outcome,
+        sequence_index=1,
+        blocked_by_work_item=upstream,
+        repo="repo-a",
+        lane="ci",
+        work_type="review",
+        status=WorkItemStatus.READY,
+    )
+
+    session.add_all([intent, outcome, upstream, downstream])
+    session.commit()
+    session.expunge_all()
+
+    stored_downstream = session.get(WorkItem, downstream.id)
+    stored_upstream = session.get(WorkItem, upstream.id)
+
+    assert stored_downstream.blocked_by_work_item_id == upstream.id
+    assert stored_downstream.blocked_by_work_item.id == upstream.id
+    assert [item.id for item in stored_upstream.dependent_work_items] == [downstream.id]
+
+
+def test_work_items_are_ordered_by_sequence_index(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    late = WorkItem(
+        outcome=outcome,
+        sequence_index=10,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    early = WorkItem(
+        outcome=outcome,
+        sequence_index=5,
+        repo="repo-a",
+        lane="ci",
+        work_type="review",
+        status=WorkItemStatus.READY,
+    )
+
+    session.add_all([intent, outcome, late, early])
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(Outcome, outcome.id)
+    assert [item.sequence_index for item in stored.work_items] == [5, 10]
+
+
+def test_work_item_sequence_index_must_be_unique_per_outcome(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+
+    session.add_all(
+        [
+            intent,
+            outcome,
+            WorkItem(
+                outcome=outcome,
+                sequence_index=0,
+                repo="repo-a",
+                lane="coder",
+                work_type="execute",
+                status=WorkItemStatus.READY,
+            ),
+            WorkItem(
+                outcome=outcome,
+                sequence_index=0,
+                repo="repo-a",
+                lane="ci",
+                work_type="review",
+                status=WorkItemStatus.READY,
+            ),
+        ]
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_work_item_dependency_cannot_cross_outcomes(session):
+    session.execute(text("PRAGMA foreign_keys=ON"))
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    first_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    second_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Harden /music",
+        goal="Add tests",
+        phase=OutcomePhase.READY,
+    )
+    upstream = WorkItem(
+        outcome=first_outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    session.add_all([intent, first_outcome, second_outcome, upstream])
+    session.flush()
+
+    downstream = WorkItem(
+        outcome=second_outcome,
+        sequence_index=0,
+        blocked_by_work_item_id=upstream.id,
+        repo="repo-a",
+        lane="ci",
+        work_type="review",
+        status=WorkItemStatus.READY,
+    )
+
+    session.add(downstream)
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_outcome_current_work_item_must_belong_to_same_outcome(session):
+    session.execute(text("PRAGMA foreign_keys=ON"))
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    first_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.RUNNING,
+    )
+    second_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Harden /music",
+        goal="Add tests",
+        phase=OutcomePhase.RUNNING,
+    )
+    first_work_item = WorkItem(
+        outcome=first_outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.RUNNING,
+    )
+    second_work_item = WorkItem(
+        outcome=second_outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.RUNNING,
+    )
+
+    session.add_all([intent, first_outcome, second_outcome, first_work_item, second_work_item])
+    session.commit()
+
+    first_outcome.current_work_item_id = second_work_item.id
+
+    with pytest.raises(ValueError):
+        session.commit()
+
+
+def test_outcome_event_payload_is_append_only(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.RUNNING,
+    )
+    event = OutcomeEvent(outcome=outcome, event_type="lease_extended", payload={"lease": {"id": 1, "seconds": 30}})
+
+    session.add_all([intent, outcome, event])
+    session.commit()
+    event_id = event.id
+
+    event.payload["lease"]["seconds"] = 45
+    with pytest.raises((StatementError, ValueError)):
+        session.commit()
+    session.rollback()
+    session.expunge_all()
+
+    stored = session.get(OutcomeEvent, event_id)
+    assert stored.payload == {"lease": {"id": 1, "seconds": 30}}
+
+
+def test_outcome_event_delete_is_rejected(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.RUNNING,
+    )
+    event = OutcomeEvent(outcome=outcome, event_type="lease_extended", payload={"lease": {"id": 1, "seconds": 30}})
+
+    session.add_all([intent, outcome, event])
+    session.commit()
+    event_id = event.id
+
+    session.delete(event)
+    with pytest.raises((StatementError, ValueError)):
+        session.commit()
+    session.rollback()
+
+    assert session.get(OutcomeEvent, event_id) is not None
+
+
+def test_outcome_with_null_current_work_item_persists(session):
+    session.execute(text("PRAGMA foreign_keys=ON"))
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.PLANNING,
+    )
+
+    session.add_all([intent, outcome])
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(Outcome, outcome.id)
+    assert stored.current_work_item_id is None
+
+
+def test_outcome_current_work_item_has_db_foreign_key(session):
+    rows = session.execute(text("PRAGMA foreign_key_list(outcomes)")).all()
+
+    assert any(row[2] == "work_items" and row[3] == "current_work_item_id" and row[4] == "id" for row in rows)
+
+
+def test_cannot_move_referenced_current_work_item_to_different_outcome(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    first_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.RUNNING,
+    )
+    second_outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Harden /music",
+        goal="Add tests",
+        phase=OutcomePhase.READY,
+    )
+    current_item = WorkItem(
+        outcome=first_outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.RUNNING,
+    )
+
+    session.add_all([intent, first_outcome, second_outcome, current_item])
+    session.commit()
+    current_item_id = current_item.id
+    first_outcome_id = first_outcome.id
+
+    first_outcome.current_work_item_id = current_item.id
+    session.commit()
+
+    current_item.outcome_id = second_outcome.id
+    with pytest.raises(ValueError):
+        session.commit()
+    session.rollback()
+    session.expunge_all()
+
+    stored_item = session.get(WorkItem, current_item_id)
+    stored_outcome = session.get(Outcome, first_outcome_id)
+
+    assert stored_item.outcome_id == first_outcome_id
+    assert stored_outcome.current_work_item_id == current_item_id
 
 
 def test_make_engine_uses_static_pool_for_in_memory_sqlite():
