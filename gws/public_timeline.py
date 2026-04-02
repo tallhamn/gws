@@ -227,10 +227,12 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             "title": outcomes[0].title if outcomes else intent.intent_id,
             "brief_summary": _brief_teaser(intent.brief_text or ""),
         },
-        "case_progress": {
-            "total_cases": len(outcomes),
-            "completed_cases": sum(1 for outcome in outcomes if outcome.phase is OutcomePhase.COMPLETED),
-            "active_cases": sum(1 for outcome in outcomes if outcome.phase in {OutcomePhase.PLANNING, OutcomePhase.READY, OutcomePhase.RUNNING}),
+        "outcome_progress": {
+            "total_outcomes": len(outcomes),
+            "completed_outcomes": sum(1 for outcome in outcomes if outcome.phase is OutcomePhase.COMPLETED),
+            "active_outcomes": sum(
+                1 for outcome in outcomes if outcome.phase in {OutcomePhase.PLANNING, OutcomePhase.READY, OutcomePhase.RUNNING}
+            ),
         },
         "now_building": now_building,
         "timeline_events": timeline_events,

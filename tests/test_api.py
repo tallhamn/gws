@@ -67,7 +67,7 @@ def test_authenticated_request_succeeds(tmp_path):
     assert response.json() == {"expired_count": 0}
 
 
-def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path):
+def test_worker_lease_issues_lease_for_ready_work_item(tmp_path, worker_registry_path):
     from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
 
     database_path = tmp_path / "api.db"
@@ -80,7 +80,7 @@ def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -107,7 +107,7 @@ def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path
     assert "work_item_id" in data
 
 
-def test_worker_lease_returns_404_when_no_ready_steps(tmp_path, worker_registry_path):
+def test_worker_lease_returns_404_when_no_ready_work_items(tmp_path, worker_registry_path):
     database_path = tmp_path / "api.db"
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{database_path}",
@@ -171,7 +171,7 @@ def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -212,7 +212,7 @@ def test_worker_heartbeat_rejects_non_owner(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -266,7 +266,7 @@ def test_worker_can_extend_lease(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
