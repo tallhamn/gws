@@ -1,0 +1,20 @@
+[project]
+name = "gws"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "pydantic>=2",
+  "pydantic-settings",
+  "pyyaml",
+  "sqlalchemy>=2",
+  "uvicorn",
+]
+
+[project.optional-dependencies]
+anthropic = ["anthropic"]
+dev = ["httpx", "pytest"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

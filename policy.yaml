@@ -1,0 +1,30 @@
+lanes:
+  coder:
+    lease_ttl_seconds: 900
+  security-review:
+    lease_ttl_seconds: 1800
+  ci:
+    lease_ttl_seconds: 1200
+  merge:
+    lease_ttl_seconds: 900
+
+path_triggers:
+  - lane: security-review
+    patterns:
+      - auth/**
+      - payments/**
+      - infra/**
+      - migrations/**
+
+content_triggers:
+  - lane: security-review
+    patterns:
+      - sso.example.com
+      - oauth
+      - jwt
+      - assumeRole
+      - "kms:"
+
+merge_requirements:
+  default:
+    - ci
