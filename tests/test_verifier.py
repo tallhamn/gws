@@ -81,7 +81,7 @@ def test_verifier_rejects_path_traversal_attempt():
     )
 
     assert verdict.result == "fail_and_replan"
-    assert "forbidden_path" in verdict.reasons or "out_of_scope" in verdict.reasons or "invalid_path" in verdict.reasons
+    assert verdict.reasons == ["forbidden_path"]
 
 
 def test_verifier_rejects_absolute_paths():
