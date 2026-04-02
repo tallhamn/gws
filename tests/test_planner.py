@@ -5,7 +5,7 @@ from pydantic import ValidationError
 from gws.config import Settings
 from gws.contracts import SynthesizedPlan
 from gws.gitops import changed_hunks
-from gws.models import Case, IntentVersion, PullRequest, Step, StepStatus
+from gws.models import IntentVersion, Outcome, OutcomePhase, PlanningSession, PlanningSessionStatus, WorkItem, WorkItemStatus
 from gws.planner_client import build_planner_client
 from gws.planner import PlannerService
 
@@ -221,12 +221,39 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
     }
 
 
-def test_planner_materializes_single_case_and_ready_step(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"max_runtime": 900})
-    session.add_all([intent, pull])
+def _planning_session(
+    session,
+    *,
+    lane: str = "coder",
+    available_repos: list[str] | None = None,
+    repo_heads: dict[str, str] | None = None,
+    planning_context: dict | None = None,
+) -> PlanningSession:
+    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="", goal="", phase=OutcomePhase.PLANNING)
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="coder-1",
+        lane=lane,
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        available_repos=available_repos or ["repo-a"],
+        repo_heads=repo_heads or {"repo-a": "abc123"},
+        planning_context=planning_context
+        or {
+            "brief": "ship /music",
+            "envelope": {"max_runtime": 900},
+            "intent_context": "music domain",
+            "planner_guidance": "prefer minimal changes",
+        },
+    )
+    session.add(planning)
     session.commit()
+    return planning
 
+
+def test_planner_materializes_outcome_and_ready_work_item(session):
+    planning = _planning_session(session)
     planner_client = FakePlannerClient(
         {
             "title": "Create /music endpoint",
@@ -238,32 +265,34 @@ def test_planner_materializes_single_case_and_ready_step(session):
         }
     )
 
-    planner = PlannerService(session, planner_client=planner_client)
-    case, step = planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
+    planner = PlannerService(session, planner_client=planner_client, lane_capabilities={"coder": "writes product code"})
+    outcome, work_item = planner.materialize_plan(planning.id)
+    session.commit()
     session.expunge_all()
 
-    stored_pull = session.get(PullRequest, pull.id)
-    stored_case = session.get(Case, case.id)
-    stored_step = session.get(Step, step.id)
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, outcome.id)
+    stored_work_item = session.get(WorkItem, work_item.id)
 
-    assert stored_case.id == case.id
-    assert stored_case.intent_id == "intent-1"
-    assert stored_case.intent_version == 1
-    assert stored_case.title == "Create /music endpoint"
-    assert stored_case.goal == "Implement /music experience"
+    assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
+    assert stored_planning.plan_payload == planner_client.plan
+    assert stored_planning.completed_at is not None
 
-    assert stored_step.id == step.id
-    assert stored_step.case_id == stored_case.id
-    assert stored_step.repo == "repo-a"
-    assert stored_step.lane == "coder"
-    assert stored_step.step_type == "execute"
-    assert stored_step.status is StepStatus.READY
-    assert stored_step.allowed_paths == ["services/**"]
-    assert stored_step.forbidden_paths == ["infra/**"]
+    assert stored_outcome.title == "Create /music endpoint"
+    assert stored_outcome.goal == "Implement /music experience"
+    assert stored_outcome.selected_repo == "repo-a"
+    assert stored_outcome.phase is OutcomePhase.READY
+    assert stored_outcome.current_work_item_id == stored_work_item.id
 
-    assert stored_pull.status == "ready"
-    assert stored_pull.repo_heads == {"repo-a": "abc123"}
-    assert stored_pull.planning_result == planner_client.plan
+    assert stored_work_item.sequence_index == 0
+    assert stored_work_item.repo == "repo-a"
+    assert stored_work_item.lane == "coder"
+    assert stored_work_item.work_type == "execute"
+    assert stored_work_item.status is WorkItemStatus.READY
+    assert stored_work_item.allowed_paths == ["services/**"]
+    assert stored_work_item.forbidden_paths == ["infra/**"]
+    assert stored_work_item.base_commit == "abc123"
+
     assert planner_client.calls == [
         {
             "brief": "ship /music",
@@ -274,11 +303,12 @@ def test_planner_materializes_single_case_and_ready_step(session):
     ]
 
 
-def test_planner_copies_step_base_commit_from_selected_repo_head(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a", "repo-b"])
-    session.add_all([intent, pull])
-    session.commit()
+def test_planner_copies_work_item_base_commit_from_selected_repo_head(session):
+    planning = _planning_session(
+        session,
+        available_repos=["repo-a", "repo-b"],
+        repo_heads={"repo-a": "abc123", "repo-b": "def456"},
+    )
 
     planner = PlannerService(
         session,
@@ -294,16 +324,40 @@ def test_planner_copies_step_base_commit_from_selected_repo_head(session):
         ),
     )
 
-    _, step = planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123", "repo-b": "def456"})
+    _, work_item = planner.materialize_plan(planning.id)
 
-    assert step.base_commit == "def456"
+    assert work_item.base_commit == "def456"
 
 
-def test_planner_errors_when_no_active_intent_version_exists(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    session.add(pull)
-    session.commit()
+def test_planner_materialize_plan_is_single_shot(session):
+    planning = _planning_session(session)
+    planner = PlannerService(
+        session,
+        planner_client=FakePlannerClient(
+            {
+                "title": "Create /music endpoint",
+                "goal": "Implement /music experience",
+                "repo": "repo-a",
+                "allowed_paths": ["services/**"],
+                "forbidden_paths": ["infra/**"],
+                "step_type": "execute",
+            }
+        ),
+    )
 
+    planner.materialize_plan(planning.id)
+
+    try:
+        planner.materialize_plan(planning.id)
+    except ValueError as exc:
+        assert str(exc) == "planning session already finalized: 1 is succeeded"
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert session.query(WorkItem).count() == 1
+
+
+def test_planner_errors_for_unknown_planning_session_id(session):
     planner = PlannerService(
         session,
         planner_client=FakePlannerClient(
@@ -319,19 +373,15 @@ def test_planner_errors_when_no_active_intent_version_exists(session):
     )
 
     try:
-        planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
+        planner.materialize_plan(999)
     except ValueError as exc:
-        assert str(exc) == "no active intent version for intent_id: intent-1"
+        assert str(exc) == "unknown planning_session_id: 999"
     else:
         raise AssertionError("expected ValueError")
 
 
-def test_planner_rejects_selected_repo_outside_pull_access_set(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    session.add_all([intent, pull])
-    session.commit()
-
+def test_planner_rejects_selected_repo_outside_planning_session_repos(session):
+    planning = _planning_session(session, available_repos=["repo-a"], repo_heads={"repo-a": "abc123", "repo-b": "def456"})
     planner = PlannerService(
         session,
         planner_client=FakePlannerClient(
@@ -347,28 +397,25 @@ def test_planner_rejects_selected_repo_outside_pull_access_set(session):
     )
 
     try:
-        planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123", "repo-b": "def456"})
+        planner.materialize_plan(planning.id)
     except ValueError as exc:
-        assert str(exc) == "repo repo-b is not in pull request access set"
+        assert str(exc) == "repo repo-b is not in planning session available repos"
     else:
         raise AssertionError("expected ValueError")
 
     session.expunge_all()
-    stored_pull = session.get(PullRequest, pull.id)
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
 
-    assert session.query(Case).count() == 0
-    assert session.query(Step).count() == 0
-    assert stored_pull.status == "pending"
-    assert stored_pull.repo_heads == {}
-    assert stored_pull.planning_result == {}
+    assert session.query(WorkItem).count() == 0
+    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.plan_payload == {}
+    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.current_work_item_id is None
 
 
 def test_planner_rejects_malformed_plan_without_mutating_state(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    session.add_all([intent, pull])
-    session.commit()
-
+    planning = _planning_session(session)
     planner = PlannerService(
         session,
         planner_client=FakePlannerClient(
@@ -383,7 +430,7 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
     )
 
     try:
-        planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
+        planner.materialize_plan(planning.id)
     except ValueError as exc:
         assert "synthesized plan invalid:" in str(exc)
         assert "step_type" in str(exc)
@@ -391,25 +438,22 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
         raise AssertionError("expected ValueError")
 
     session.expunge_all()
-    stored_pull = session.get(PullRequest, pull.id)
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
 
-    assert session.query(Case).count() == 0
-    assert session.query(Step).count() == 0
-    assert stored_pull.status == "pending"
-    assert stored_pull.repo_heads == {}
-    assert stored_pull.planning_result == {}
+    assert session.query(WorkItem).count() == 0
+    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.plan_payload == {}
+    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.current_work_item_id is None
 
 
 def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    session.add_all([intent, pull])
-    session.commit()
-
+    planning = _planning_session(session)
     planner = PlannerService(session, planner_client=FakePlannerClient(["not", "a", "mapping"]))
 
     try:
-        planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
+        planner.materialize_plan(planning.id)
     except ValueError as exc:
         assert "synthesized plan invalid:" in str(exc)
         assert "valid dictionary" in str(exc)
@@ -417,21 +461,18 @@ def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
         raise AssertionError("expected ValueError")
 
     session.expunge_all()
-    stored_pull = session.get(PullRequest, pull.id)
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
 
-    assert session.query(Case).count() == 0
-    assert session.query(Step).count() == 0
-    assert stored_pull.status == "pending"
-    assert stored_pull.repo_heads == {}
-    assert stored_pull.planning_result == {}
+    assert session.query(WorkItem).count() == 0
+    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.plan_payload == {}
+    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.current_work_item_id is None
 
 
 def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    session.add_all([intent, pull])
-    session.commit()
-
+    planning = _planning_session(session)
     planner = PlannerService(
         session,
         planner_client=FakePlannerClient(
@@ -447,7 +488,7 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     )
 
     try:
-        planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
+        planner.materialize_plan(planning.id)
     except ValueError as exc:
         assert "synthesized plan invalid:" in str(exc)
         assert "allowed_paths" in str(exc)
@@ -455,13 +496,14 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
         raise AssertionError("expected ValueError")
 
     session.expunge_all()
-    stored_pull = session.get(PullRequest, pull.id)
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
 
-    assert session.query(Case).count() == 0
-    assert session.query(Step).count() == 0
-    assert stored_pull.status == "pending"
-    assert stored_pull.repo_heads == {}
-    assert stored_pull.planning_result == {}
+    assert session.query(WorkItem).count() == 0
+    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.plan_payload == {}
+    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.current_work_item_id is None
 
 
 def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(monkeypatch):
