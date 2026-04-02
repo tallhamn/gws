@@ -50,12 +50,29 @@ class WorkerRegistry:
                 raise ValueError(f"missing required worker keys: {', '.join(missing_keys)}")
 
             token = raw_worker["token"]
+            if not isinstance(token, str):
+                raise ValueError("token must be a string")
+
+            worker_id = raw_worker["worker_id"]
+            if not isinstance(worker_id, str):
+                raise ValueError("worker_id must be a string")
+
+            lane = raw_worker["lane"]
+            if not isinstance(lane, str):
+                raise ValueError("lane must be a string")
+
+            repo_access_set = raw_worker["repo_access_set"]
+            if not isinstance(repo_access_set, list):
+                raise ValueError("repo_access_set must be a list")
+            if any(not isinstance(repo_access_entry, str) for repo_access_entry in repo_access_set):
+                raise ValueError("repo_access_set entries must be strings")
+
             if token in workers_by_token:
                 raise ValueError(f"duplicate worker token: {token}")
             workers_by_token[token] = WorkerIdentity(
-                worker_id=raw_worker["worker_id"],
-                lane=raw_worker["lane"],
-                repo_access_set=tuple(raw_worker["repo_access_set"]),
+                worker_id=worker_id,
+                lane=lane,
+                repo_access_set=tuple(repo_access_set),
             )
         return cls(workers_by_token)
 

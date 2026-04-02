@@ -98,3 +98,88 @@ def test_worker_registry_rejects_workers_missing_required_keys(tmp_path):
 
     with pytest.raises(ValueError, match="missing required worker keys: repo_access_set"):
         WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_string_repo_access_set(tmp_path):
+    path = tmp_path / "bad-worker-string-repo-access-set.yaml"
+    path.write_text(
+        """workers:
+  - token: token-coder-1
+    worker_id: coder-1
+    lane: coder
+    repo_access_set: repo-a
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="repo_access_set must be a list"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_non_string_repo_access_entry(tmp_path):
+    path = tmp_path / "bad-worker-non-string-repo-access-entry.yaml"
+    path.write_text(
+        """workers:
+  - token: token-coder-1
+    worker_id: coder-1
+    lane: coder
+    repo_access_set:
+      - repo-a
+      - 1
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="repo_access_set entries must be strings"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_non_string_token(tmp_path):
+    path = tmp_path / "bad-worker-non-string-token.yaml"
+    path.write_text(
+        """workers:
+  - token: 123
+    worker_id: coder-1
+    lane: coder
+    repo_access_set:
+      - repo-a
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="token must be a string"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_non_string_worker_id(tmp_path):
+    path = tmp_path / "bad-worker-non-string-worker-id.yaml"
+    path.write_text(
+        """workers:
+  - token: token-coder-1
+    worker_id: 123
+    lane: coder
+    repo_access_set:
+      - repo-a
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="worker_id must be a string"):
+        WorkerRegistry.from_file(str(path))
+
+
+def test_worker_registry_rejects_non_string_lane(tmp_path):
+    path = tmp_path / "bad-worker-non-string-lane.yaml"
+    path.write_text(
+        """workers:
+  - token: token-coder-1
+    worker_id: coder-1
+    lane: 123
+    repo_access_set:
+      - repo-a
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="lane must be a string"):
+        WorkerRegistry.from_file(str(path))
