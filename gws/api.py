@@ -185,13 +185,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 .first()
             )
 
-            if step is None and payload.intent_id and payload.repo_heads:
-                intent = (
-                    session.query(IntentVersion)
-                    .filter(IntentVersion.intent_id == payload.intent_id)
-                    .order_by(IntentVersion.intent_version.desc())
-                    .first()
-                )
+            if step is None and payload.repo_heads:
+                if payload.intent_id:
+                    intent = (
+                        session.query(IntentVersion)
+                        .filter(IntentVersion.intent_id == payload.intent_id)
+                        .order_by(IntentVersion.intent_version.desc())
+                        .first()
+                    )
+                else:
+                    # No intent_id specified — use the most recent intent
+                    intent = (
+                        session.query(IntentVersion)
+                        .order_by(IntentVersion.created_at.desc())
+                        .first()
+                    )
                 if intent is not None:
                     from .planner import PlannerService
                     from .planner_client import build_planner_client
@@ -208,14 +216,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         pr = PullRequest(
                             worker_id=payload.worker_id,
                             lane=lane,
-                            intent_id=payload.intent_id,
+                            intent_id=intent.intent_id,
                             repo_access_set=list(payload.repo_heads.keys()),
                         )
                         session.add(pr)
                         session.commit()
                         session.refresh(pr)
                         _case, step = planner_service.plan_pull_request(pr.id, payload.repo_heads)
-                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, lane, payload.intent_id)
+                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, lane, intent.intent_id)
                     except Exception as exc:
                         logger.warning("JIT planning failed for lane %s: %s", lane, exc)
                         step = None
