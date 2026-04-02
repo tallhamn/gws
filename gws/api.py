@@ -16,11 +16,14 @@ from .contracts import (
     WorkerHeartbeatRequest,
     WorkerHeartbeatResponse,
     WorkerLeaseRequest,
+    WorkerLeaseExtensionRequest,
+    WorkerLeaseExtensionResponse,
     WorkerLeaseResponse,
 )
+from .coordinator import PlanningCoordinator
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
-from .models import Lease, PullRequest
+from .models import Lease
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +76,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def _control_plane(session) -> ControlPlaneService:
         return ControlPlaneService(session, policy_path=settings.policy_path)
 
-    def _jit_plan_step(
+    def _jit_plan_work_item(
         *,
         session,
         worker: WorkerIdentity,
@@ -82,7 +85,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         eligible_repo_heads: dict[str, str],
     ):
         from .models import IntentVersion
-        from .planner import PlannerService
         from .planner_client import build_planner_client
         from .policy import PolicyEngine
 
@@ -105,30 +107,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         try:
             planner_client = build_planner_client(settings)
             policy = PolicyEngine.from_file(settings.policy_path)
-            planner_service = PlannerService(
+            coordinator = PlanningCoordinator(
                 session,
-                planner_client,
+                planner_client=planner_client,
+                planner_provider=settings.planner_provider,
+                planner_model=settings.planner_model,
                 lane_capabilities=policy.lane_capabilities(),
             )
-            planning_request = PullRequest(
+            _outcome, work_item = coordinator.plan_outcome(
+                intent_id=intent.intent_id,
                 worker_id=worker.worker_id,
                 lane=worker.lane,
-                intent_id=intent.intent_id,
-                repo_access_set=accessible_repos,
+                available_repos=accessible_repos,
+                repo_heads=eligible_repo_heads,
             )
-            session.add(planning_request)
-            session.commit()
-            session.refresh(planning_request)
-            _case, step = planner_service.plan_pull_request(planning_request.id, eligible_repo_heads)
-            logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, worker.lane, intent.intent_id)
-            return step
+            logger.info("JIT planned work item %d for lane %s (intent=%s)", work_item.id, worker.lane, intent.intent_id)
+            return work_item
         except Exception as exc:
             logger.exception("JIT planning failed for lane %s", worker.lane)
             raise PlanningUnavailableError("Planning unavailable") from exc
 
-    async def _complete_step_for_worker(
+    async def _complete_work_item_for_worker(
         *,
-        step_id: int,
+        work_item_id: int,
         touched_paths: list[str],
         changed_hunks: list[str],
         worker: WorkerIdentity,
@@ -136,8 +137,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_factory() as session:
             service = _control_plane(session)
             try:
-                service.apply_completed_diff(
-                    step_id=step_id,
+                service.apply_attempt_completion(
+                    work_item_id=work_item_id,
                     worker_id=worker.worker_id,
                     touched_paths=touched_paths,
                     changed_hunks=changed_hunks,
@@ -145,32 +146,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             except PermissionError as exc:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
             except ValueError as exc:
-                logger.warning("Step %d completion failed: %s", step_id, str(exc))
-                if str(exc) == f"unknown step_id: {step_id}":
-                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from exc
+                logger.warning("Work item %d completion failed: %s", work_item_id, str(exc))
+                if str(exc) == f"unknown work_item_id: {work_item_id}":
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work item not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-
-            # Run artifact verification if the step passed scope checks and has requirements.
-            from .models import Step, StepStatus
-
-            step = session.get(Step, step_id)
-            if step and step.status == StepStatus.SUCCEEDED and step.artifact_requirements:
-                from .verifier import verify_artifacts
-
-                gateway_url = settings.gateway_url
-                if gateway_url:
-                    artifact_result = await verify_artifacts(
-                        requirements=list(step.artifact_requirements),
-                        gateway_url=gateway_url,
-                        repo=step.repo,
-                    )
-                    if not artifact_result.passed:
-                        step.status = StepStatus.FAILED
-                        session.commit()
-                        logger.info("Step %d artifact verification failed", step_id)
-                        return WorkerCompletionResponse(status="artifact_verification_failed")
-
-            logger.info("Step %d completed, status=%s", step_id, "processed")
+            logger.info("Work item %d completed, status=%s", work_item_id, "processed")
             return WorkerCompletionResponse(status="processed")
 
     @app.post("/worker/lease", response_model=WorkerLeaseResponse)
@@ -179,7 +159,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         worker: WorkerIdentity = Depends(require_worker),
     ) -> WorkerLeaseResponse:
         with session_factory() as session:
-            from .models import Step, StepStatus
+            from .models import WorkItem, WorkItemStatus
 
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
@@ -188,20 +168,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 if repo in worker.repo_access_set
             }
 
-            step = (
-                session.query(Step)
+            work_item = (
+                session.query(WorkItem)
                 .filter(
-                    Step.lane == worker.lane,
-                    Step.status == StepStatus.READY,
-                    Step.repo.in_(accessible_repos),
+                    WorkItem.lane == worker.lane,
+                    WorkItem.status == WorkItemStatus.READY,
+                    WorkItem.repo.in_(accessible_repos),
                 )
-                .order_by(Step.id)
+                .order_by(WorkItem.id)
                 .first()
             )
 
-            if step is None and eligible_repo_heads:
+            if work_item is None and eligible_repo_heads:
                 try:
-                    step = _jit_plan_step(
+                    work_item = _jit_plan_work_item(
                         session=session,
                         worker=worker,
                         intent_id=payload.intent_id,
@@ -211,25 +191,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 except PlanningUnavailableError as exc:
                     raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Planning unavailable") from exc
 
-            if step is None:
+            if work_item is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No eligible work")
 
             service = _control_plane(session)
             try:
-                lease = service.issue_lease(step_id=step.id, worker_id=worker.worker_id, ttl_seconds=payload.ttl_seconds)
+                lease = service.issue_lease(
+                    work_item_id=work_item.id,
+                    worker_id=worker.worker_id,
+                    ttl_seconds=payload.ttl_seconds,
+                )
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
             return WorkerLeaseResponse(
                 lease_id=lease.id,
-                step_id=step.id,
-                title=step.case.title,
-                goal=step.case.goal,
-                repo=step.repo,
-                step_type=step.step_type,
-                allowed_paths=list(step.allowed_paths),
-                forbidden_paths=list(step.forbidden_paths),
-                base_commit=step.base_commit,
-                artifact_requirements=list(step.artifact_requirements),
+                work_item_id=work_item.id,
+                title=work_item.outcome.title,
+                goal=work_item.outcome.goal,
+                repo=work_item.repo,
+                work_type=work_item.work_type,
+                allowed_paths=list(work_item.allowed_paths),
+                forbidden_paths=list(work_item.forbidden_paths),
+                base_commit=work_item.base_commit,
+                artifact_requirements=list(work_item.artifact_requirements),
                 heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
             )
 
@@ -257,14 +241,45 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
             )
 
-    @app.post("/worker/steps/{step_id}/complete", response_model=WorkerCompletionResponse)
-    async def complete_worker_step(
-        step_id: int,
+    @app.post("/worker/leases/{lease_id}/extend", response_model=WorkerLeaseExtensionResponse)
+    def extend_worker_lease(
+        lease_id: int,
+        payload: WorkerLeaseExtensionRequest,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> WorkerLeaseExtensionResponse:
+        with session_factory() as session:
+            lease = session.get(Lease, lease_id)
+            if lease is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found")
+            if lease.worker_id != worker.worker_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="lease belongs to another worker")
+            service = _control_plane(session)
+            try:
+                lease = service.extend_lease(
+                    lease_id=lease_id,
+                    worker_id=worker.worker_id,
+                    ttl_seconds=payload.ttl_seconds,
+                    reason=payload.reason,
+                )
+            except PermissionError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
+            except ValueError as exc:
+                if "unknown lease_id" in str(exc):
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found") from exc
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            return WorkerLeaseExtensionResponse(
+                lease_id=lease.id,
+                heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
+            )
+
+    @app.post("/worker/work-items/{work_item_id}/complete", response_model=WorkerCompletionResponse)
+    async def complete_worker_work_item(
+        work_item_id: int,
         payload: WorkerCompletionRequest,
         worker: WorkerIdentity = Depends(require_worker),
     ) -> WorkerCompletionResponse:
-        return await _complete_step_for_worker(
-            step_id=step_id,
+        return await _complete_work_item_for_worker(
+            work_item_id=work_item_id,
             touched_paths=payload.touched_paths,
             changed_hunks=payload.changed_hunks,
             worker=worker,

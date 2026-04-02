@@ -20,11 +20,11 @@ class WorkerLeaseRequest(BaseModel):
 
 class WorkerLeaseResponse(BaseModel):
     lease_id: int
-    step_id: int
+    work_item_id: int
     repo: str
     title: str
     goal: str
-    step_type: str
+    work_type: str
     allowed_paths: list[str]
     forbidden_paths: list[str]
     base_commit: str | None = None
@@ -37,6 +37,16 @@ class WorkerHeartbeatRequest(BaseModel):
 
 
 class WorkerHeartbeatResponse(BaseModel):
+    lease_id: int
+    heartbeat_deadline: str
+
+
+class WorkerLeaseExtensionRequest(BaseModel):
+    ttl_seconds: int = 60
+    reason: str
+
+
+class WorkerLeaseExtensionResponse(BaseModel):
     lease_id: int
     heartbeat_deadline: str
 

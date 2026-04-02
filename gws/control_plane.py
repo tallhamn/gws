@@ -310,12 +310,14 @@ class ControlPlaneService:
                 submitted_diff_ref=None,
                 created_at=now,
             )
+            self.session.add_all([lease, attempt])
             work_item.status = WorkItemStatus.LEASED
             work_item.outcome.phase = OutcomePhase.RUNNING
             work_item.outcome.current_work_item_id = work_item.id
             target_id = work_item_id
 
-        self.session.add_all([lease, attempt])
+        if step_id is not None:
+            self.session.add_all([lease, attempt])
         try:
             self.session.commit()
         except IntegrityError as exc:

@@ -68,7 +68,7 @@ def test_authenticated_request_succeeds(tmp_path):
 
 
 def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path):
-    from gws.models import Case, IntentVersion, Step, StepStatus
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
 
     database_path = tmp_path / "api.db"
     settings = Settings(
@@ -80,9 +80,16 @@ def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
-        step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-        session.add_all([intent, case, step])
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        work_item = WorkItem(
+            outcome=outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([intent, outcome, work_item])
         session.commit()
 
     app = create_app(settings)
@@ -97,7 +104,7 @@ def test_worker_lease_issues_lease_for_ready_step(tmp_path, worker_registry_path
     assert response.status_code == 200
     data = response.json()
     assert "lease_id" in data
-    assert "step_id" in data
+    assert "work_item_id" in data
 
 
 def test_worker_lease_returns_404_when_no_ready_steps(tmp_path, worker_registry_path):
@@ -152,7 +159,7 @@ def test_worker_lease_returns_503_when_jit_planning_is_unavailable(tmp_path, wor
 
 def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
     from gws.control_plane import ControlPlaneService
-    from gws.models import Case, IntentVersion, Step, StepStatus
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
 
     database_path = tmp_path / "api.db"
     settings = Settings(
@@ -164,11 +171,18 @@ def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
-        step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-        session.add_all([intent, case, step])
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        work_item = WorkItem(
+            outcome=outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([intent, outcome, work_item])
         session.commit()
-        lease = ControlPlaneService(session).issue_lease(step.id, "coder-1", 60)
+        lease = ControlPlaneService(session).issue_lease(work_item_id=work_item.id, worker_id="coder-1", ttl_seconds=60)
         lease_id = lease.id
 
     app = create_app(settings)
@@ -186,7 +200,7 @@ def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
 
 def test_worker_heartbeat_rejects_non_owner(tmp_path, worker_registry_path):
     from gws.control_plane import ControlPlaneService
-    from gws.models import Case, IntentVersion, Step, StepStatus
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
 
     database_path = tmp_path / "api.db"
     settings = Settings(
@@ -198,11 +212,18 @@ def test_worker_heartbeat_rejects_non_owner(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
-        step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-        session.add_all([intent, case, step])
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        work_item = WorkItem(
+            outcome=outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([intent, outcome, work_item])
         session.commit()
-        lease = ControlPlaneService(session).issue_lease(step.id, "coder-1", 60)
+        lease = ControlPlaneService(session).issue_lease(work_item_id=work_item.id, worker_id="coder-1", ttl_seconds=60)
         lease_id = lease.id
 
     app = create_app(settings)
@@ -229,3 +250,45 @@ def test_expire_leases_returns_count(tmp_path):
 
     assert response.status_code == 200
     assert response.json() == {"expired_count": 0}
+
+
+def test_worker_can_extend_lease(tmp_path, worker_registry_path):
+    from gws.control_plane import ControlPlaneService
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+
+    database_path = tmp_path / "api.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Case", goal="Goal", phase=OutcomePhase.READY)
+        work_item = WorkItem(
+            outcome=outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([intent, outcome, work_item])
+        session.commit()
+        lease = ControlPlaneService(session).issue_lease(work_item_id=work_item.id, worker_id="coder-1", ttl_seconds=60)
+        lease_id = lease.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/worker/leases/{lease_id}/extend",
+        json={"ttl_seconds": 120, "reason": "close to finishing validation"},
+        headers=auth_headers("token-coder-1"),
+    )
+
+    assert response.status_code == 200
+    assert response.json()["lease_id"] == lease_id
+    assert "heartbeat_deadline" in response.json()
