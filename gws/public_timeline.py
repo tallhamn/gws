@@ -5,7 +5,17 @@ from typing import Any
 
 from sqlalchemy.orm import Session, selectinload
 
-from .models import Attempt, Case, IntentVersion, Lease, Step, StepStatus, Verdict, VerdictResult
+from .models import (
+    Attempt,
+    AttemptResultStatus,
+    Case,
+    IntentVersion,
+    Lease,
+    Step,
+    StepStatus,
+    Verdict,
+    VerdictResult,
+)
 
 
 def _utc_now() -> datetime:
@@ -41,12 +51,26 @@ def _latest_verdict(step: Step) -> Verdict | None:
     return max(verdicts, key=lambda item: item.id, default=None)
 
 
-def _outcome_for_step(step: Step, active_lease: Lease | None, latest_verdict: Verdict | None) -> str:
+def _outcome_for_step(
+    step: Step,
+    active_lease: Lease | None,
+    latest_attempt: Attempt | None,
+    latest_verdict: Verdict | None,
+) -> str:
     if active_lease is not None:
         return "live"
-    if step.status is StepStatus.SUCCEEDED:
-        return "succeeded"
     if latest_verdict is not None and latest_verdict.result == VerdictResult.PASS:
+        return "succeeded"
+    if latest_attempt is not None:
+        if latest_attempt.result_status is AttemptResultStatus.ACCEPTED:
+            return "succeeded"
+        if latest_attempt.result_status in {
+            AttemptResultStatus.PENDING,
+            AttemptResultStatus.SUBMITTED,
+            AttemptResultStatus.REJECTED,
+        }:
+            return "failed"
+    if step.status is StepStatus.SUCCEEDED:
         return "succeeded"
     return "failed"
 
@@ -100,7 +124,7 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             active_lease = _active_lease(step, now)
             latest_attempt = _latest_attempt(step)
             latest_verdict = _latest_verdict(step)
-            outcome = _outcome_for_step(step, active_lease, latest_verdict)
+            outcome = _outcome_for_step(step, active_lease, latest_attempt, latest_verdict)
             occurred_at = _sort_timestamp(
                 getattr(active_lease, "issued_at", None),
                 getattr(latest_verdict, "created_at", None),
@@ -141,6 +165,7 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
     return {
         "intent": {
             "intent_id": intent.intent_id,
+            "intent_version": intent.intent_version,
             "title": cases[0].title if cases else intent.intent_id,
             "brief_summary": intent.brief_text.splitlines()[0] if intent.brief_text else "",
         },

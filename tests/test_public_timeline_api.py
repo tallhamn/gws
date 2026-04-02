@@ -146,6 +146,7 @@ def test_public_timeline_returns_live_and_recent_events(tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["intent"]["intent_id"] == "intent-vector-room"
+    assert data["intent"]["intent_version"] == 1
     assert data["now_building"]["worker_id"] == "coder2"
     assert data["now_building"]["lease_status"] == "live"
     assert data["timeline_events"][0]["sequence_label"] == "1. Concept brief locked"
@@ -186,3 +187,65 @@ def test_public_timeline_returns_quiet_now_building_when_no_active_lease(tmp_pat
     data = response.json()
     assert data["now_building"]["lease_status"] == "idle"
     assert data["timeline_events"][0]["title"] == "Concept brief locked"
+
+
+def test_public_timeline_uses_attempt_state_for_outcome_when_no_verdict(tmp_path):
+    database_path = tmp_path / "timeline-attempt.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with session_factory() as session:
+        intent = IntentVersion(intent_id="intent-attempt-state", intent_version=7, brief_text="Build attempt state")
+        case = Case(
+            intent_id="intent-attempt-state",
+            intent_version=7,
+            title="Build attempt outcome",
+            goal="Make the attempt outcome visible in the timeline",
+        )
+        step = Step(
+            case=case,
+            repo="studio-tactical-vector",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.LEASED,
+            allowed_paths=["drops/attempt-state/**"],
+            forbidden_paths=[],
+        )
+        session.add_all([intent, case, step])
+        session.commit()
+
+        lease = Lease(
+            step_id=step.id,
+            worker_id="coder9",
+            lane="coder",
+            issued_at=now - timedelta(minutes=12),
+            heartbeat_deadline=now - timedelta(minutes=1),
+            expires_at=now - timedelta(minutes=1),
+            expired_at=now - timedelta(minutes=1),
+        )
+        session.add(lease)
+        session.commit()
+
+        attempt = Attempt(
+            step_id=step.id,
+            lease_id=lease.id,
+            worker_id="coder9",
+            repo="studio-tactical-vector",
+            result_status=AttemptResultStatus.ACCEPTED,
+            artifact_refs=[],
+            submitted_diff_ref="inline",
+            created_at=now - timedelta(minutes=2),
+        )
+        session.add(attempt)
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-attempt-state/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["timeline_events"][1]["outcome"] == "succeeded"
