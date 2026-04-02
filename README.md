@@ -33,6 +33,8 @@ Worker identities for authenticated pull-request creation live in `workers.yaml`
 
 `POST /pull-requests` requires `Authorization: Bearer <token>` and derives the worker identity server-side. The request body only needs the envelope payload.
 
+`POST /steps/{step_id}/complete` also requires `Authorization: Bearer <token>` and only accepts completion from the worker that owns the active lease.
+
 ## Repository Layout
 
 - `gws/` active control-plane runtime

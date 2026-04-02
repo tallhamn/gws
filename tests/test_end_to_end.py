@@ -175,3 +175,52 @@ def test_completed_diff_rejects_non_owner_worker_via_api(tmp_path, worker_regist
     assert step is not None
     assert step.status == StepStatus.LEASED
     assert verdicts == []
+
+
+def test_completed_diff_rejects_missing_authorization_via_api(tmp_path, worker_registry_path):
+    database_path = tmp_path / "end_to_end_missing_auth.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief"))
+        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
+        step = Step(
+            case=case,
+            repo="repo-a",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.READY,
+            allowed_paths=["auth/**"],
+            forbidden_paths=[],
+        )
+        session.add_all([case, step])
+        session.commit()
+        ControlPlaneService(session).issue_lease(step.id, worker_id="coder-1", ttl_seconds=60)
+        step_id = step.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/steps/{step_id}/complete",
+        json={
+            "touched_paths": ["auth/session.py"],
+            "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid authorization header"}
+
+    with session_factory() as session:
+        step = session.get(Step, step_id)
+        verdicts = session.query(Verdict).all()
+
+    assert step is not None
+    assert step.status == StepStatus.LEASED
+    assert verdicts == []
