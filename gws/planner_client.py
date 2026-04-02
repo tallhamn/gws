@@ -6,7 +6,17 @@ from .config import Settings
 
 
 class PlannerClient(Protocol):
-    def synthesize(self, *, brief: str, lane: str, repo_heads: dict[str, str], envelope: dict) -> dict:
+    def synthesize(
+        self,
+        *,
+        brief: str,
+        lane: str,
+        repo_heads: dict[str, str],
+        envelope: dict,
+        lane_capabilities: dict[str, str] | None = None,
+        intent_context: str | None = None,
+        planner_guidance: str | None = None,
+    ) -> dict:
         ...
 
 

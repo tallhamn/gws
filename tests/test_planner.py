@@ -10,7 +10,17 @@ class FakePlannerClient:
         self.plan = plan
         self.calls: list[dict] = []
 
-    def synthesize(self, *, brief: str, lane: str, repo_heads: dict[str, str], envelope: dict) -> dict:
+    def synthesize(
+        self,
+        *,
+        brief: str,
+        lane: str,
+        repo_heads: dict[str, str],
+        envelope: dict,
+        lane_capabilities: dict | None = None,
+        intent_context: str | None = None,
+        planner_guidance: str | None = None,
+    ) -> dict:
         self.calls.append(
             {
                 "brief": brief,

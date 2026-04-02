@@ -21,9 +21,10 @@ class PlannerService:
         "step_type",
     )
 
-    def __init__(self, session: Session, planner_client: PlannerClient):
+    def __init__(self, session: Session, planner_client: PlannerClient, *, lane_capabilities: dict[str, str] | None = None):
         self.session = session
         self.planner_client = planner_client
+        self.lane_capabilities = lane_capabilities
 
     def plan_pull_request(self, pull_request_id: int, repo_heads: dict[str, str]) -> tuple[Case, Step]:
         pull = self.session.get(PullRequest, pull_request_id)
@@ -46,6 +47,9 @@ class PlannerService:
             lane=pull.lane,
             repo_heads=repo_heads,
             envelope=pull.envelope,
+            lane_capabilities=self.lane_capabilities,
+            intent_context=active_intent.context or None,
+            planner_guidance=active_intent.planner_guidance or None,
         )
         try:
             plan = self._validate_plan(plan)
