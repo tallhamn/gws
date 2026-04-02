@@ -72,14 +72,18 @@ def test_synthesized_plan_rejects_missing_required_keys():
 
 def test_settings_expose_generic_planner_fields():
     settings = Settings(
-        planner_provider="anthropic",
+        planner_provider="claude_code",
         planner_model="claude-sonnet-4-20250514",
         planner_api_key="test-key",
+        planner_command="claude",
+        planner_effort="max",
     )
 
-    assert settings.planner_provider == "anthropic"
+    assert settings.planner_provider == "claude_code"
     assert settings.planner_model == "claude-sonnet-4-20250514"
     assert settings.planner_api_key == "test-key"
+    assert settings.planner_command == "claude"
+    assert settings.planner_effort == "max"
 
 
 def test_settings_does_not_expose_anthropic_api_key_as_a_public_field():
@@ -106,13 +110,49 @@ def test_build_planner_client_rejects_unknown_provider():
         raise AssertionError("expected ValueError")
 
 
-def test_build_planner_client_requires_provider():
+def test_build_planner_client_prefers_claude_code_when_available(monkeypatch):
+    captured = {}
+
+    class FakeClaudePlannerClient:
+        def __init__(self, *, command, model, effort, timeout):
+            captured["command"] = command
+            captured["model"] = model
+            captured["effort"] = effort
+            captured["timeout"] = timeout
+
+        @staticmethod
+        def is_available(command: str = "claude") -> bool:
+            captured["availability_command"] = command
+            return True
+
+    monkeypatch.setattr("gws.planner_client.ClaudeCodePlannerClient", FakeClaudePlannerClient)
+
+    client = build_planner_client(Settings(planner_command="claude", planner_effort="max", planner_timeout=12.5))
+
+    assert isinstance(client, FakeClaudePlannerClient)
+    assert captured == {
+        "availability_command": "claude",
+        "command": "claude",
+        "model": None,
+        "effort": "max",
+        "timeout": 12.5,
+    }
+
+
+def test_build_planner_client_requires_available_provider(monkeypatch):
+    class FakeClaudePlannerClient:
+        @staticmethod
+        def is_available(command: str = "claude") -> bool:
+            return False
+
+    monkeypatch.setattr("gws.planner_client.ClaudeCodePlannerClient", FakeClaudePlannerClient)
+
     settings = Settings()
 
     try:
         build_planner_client(settings)
     except ValueError as exc:
-        assert str(exc) == "planner_provider is required"
+        assert str(exc) == "no planner provider available"
     else:
         raise AssertionError("expected ValueError")
 

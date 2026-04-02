@@ -225,6 +225,53 @@ def test_apply_completed_diff_deduplicates_existing_review_step(session):
     assert len(verdicts) == 1
 
 
+def test_apply_completed_diff_uses_configured_policy_path(session, tmp_path):
+    custom_policy_path = tmp_path / "custom-policy.yaml"
+    custom_policy_path.write_text(
+        """lanes:
+  coder:
+    lease_ttl_seconds: 900
+path_triggers: []
+content_triggers: []
+merge_requirements:
+  default: []
+""",
+        encoding="utf-8",
+    )
+
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    step = Step(
+        case=case,
+        repo="repo-a",
+        lane="coder",
+        step_type="execute",
+        status=StepStatus.READY,
+        allowed_paths=["auth/**"],
+        forbidden_paths=[],
+    )
+    session.add_all([intent, case, step])
+    session.commit()
+
+    service = ControlPlaneService(session, policy_path=str(custom_policy_path))
+    service.issue_lease(step_id=step.id, worker_id="worker-1", ttl_seconds=60)
+
+    service.apply_completed_diff(
+        step_id=step.id,
+        worker_id="worker-1",
+        touched_paths=["auth/session.py"],
+        changed_hunks=["+issuer = 'https://sso.example.com'"],
+    )
+
+    session.refresh(step)
+    verdicts = session.query(Verdict).all()
+    review_steps = session.query(Step).filter(Step.case_id == case.id, Step.step_type == "review").all()
+
+    assert step.status is StepStatus.SUCCEEDED
+    assert verdicts[0].result is VerdictResult.PASS
+    assert review_steps == []
+
+
 def test_apply_completed_diff_rejects_non_owner_worker_without_mutating_lease_or_verdict(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
     case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")

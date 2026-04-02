@@ -13,8 +13,9 @@ logger = logging.getLogger(__name__)
 
 
 class ControlPlaneService:
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, *, policy_path: str = "policy.yaml"):
         self.session = session
+        self.policy_path = policy_path
 
     def apply_completed_diff(
         self,
@@ -63,6 +64,7 @@ class ControlPlaneService:
             changed_hunks=changed_hunks,
             allowed_paths=list(step.allowed_paths),
             forbidden_paths=list(step.forbidden_paths),
+            policy_path=self.policy_path,
         )
         attempt.submitted_diff_ref = "inline"
         if verdict.result in {VerdictResult.PASS.value, VerdictResult.APPEND_GOVERNANCE_STEP.value}:

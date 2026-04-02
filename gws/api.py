@@ -32,6 +32,10 @@ class IntentCreate(BaseModel):
     planner_guidance: str = ""
 
 
+class PlanningUnavailableError(RuntimeError):
+    pass
+
+
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
@@ -66,6 +70,62 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
+    def _control_plane(session) -> ControlPlaneService:
+        return ControlPlaneService(session, policy_path=settings.policy_path)
+
+    def _jit_plan_step(
+        *,
+        session,
+        worker: WorkerIdentity,
+        intent_id: str | None,
+        accessible_repos: list[str],
+        eligible_repo_heads: dict[str, str],
+    ):
+        from .models import IntentVersion
+        from .planner import PlannerService
+        from .planner_client import build_planner_client
+        from .policy import PolicyEngine
+
+        if intent_id:
+            intent = (
+                session.query(IntentVersion)
+                .filter(IntentVersion.intent_id == intent_id)
+                .order_by(IntentVersion.intent_version.desc())
+                .first()
+            )
+        else:
+            intent = (
+                session.query(IntentVersion)
+                .order_by(IntentVersion.created_at.desc())
+                .first()
+            )
+        if intent is None:
+            return None
+
+        try:
+            planner_client = build_planner_client(settings)
+            policy = PolicyEngine.from_file(settings.policy_path)
+            planner_service = PlannerService(
+                session,
+                planner_client,
+                lane_capabilities=policy.lane_capabilities(),
+            )
+            planning_request = PullRequest(
+                worker_id=worker.worker_id,
+                lane=worker.lane,
+                intent_id=intent.intent_id,
+                repo_access_set=accessible_repos,
+            )
+            session.add(planning_request)
+            session.commit()
+            session.refresh(planning_request)
+            _case, step = planner_service.plan_pull_request(planning_request.id, eligible_repo_heads)
+            logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, worker.lane, intent.intent_id)
+            return step
+        except Exception as exc:
+            logger.exception("JIT planning failed for lane %s", worker.lane)
+            raise PlanningUnavailableError("Planning unavailable") from exc
+
     async def _complete_step_for_worker(
         *,
         step_id: int,
@@ -74,7 +134,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         worker: WorkerIdentity,
     ) -> WorkerCompletionResponse:
         with session_factory() as session:
-            service = ControlPlaneService(session)
+            service = _control_plane(session)
             try:
                 service.apply_completed_diff(
                     step_id=step_id,
@@ -119,10 +179,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         worker: WorkerIdentity = Depends(require_worker),
     ) -> WorkerLeaseResponse:
         with session_factory() as session:
-            from .models import IntentVersion, Step, StepStatus
-            from .planner import PlannerService
-            from .planner_client import build_planner_client
-            from .policy import PolicyEngine
+            from .models import Step, StepStatus
 
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
@@ -143,48 +200,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             )
 
             if step is None and eligible_repo_heads:
-                if payload.intent_id:
-                    intent = (
-                        session.query(IntentVersion)
-                        .filter(IntentVersion.intent_id == payload.intent_id)
-                        .order_by(IntentVersion.intent_version.desc())
-                        .first()
+                try:
+                    step = _jit_plan_step(
+                        session=session,
+                        worker=worker,
+                        intent_id=payload.intent_id,
+                        accessible_repos=accessible_repos,
+                        eligible_repo_heads=eligible_repo_heads,
                     )
-                else:
-                    # No intent_id specified — use the most recent intent
-                    intent = (
-                        session.query(IntentVersion)
-                        .order_by(IntentVersion.created_at.desc())
-                        .first()
-                    )
-                if intent is not None:
-                    try:
-                        planner_client = build_planner_client(settings)
-                        policy = PolicyEngine.from_file(settings.policy_path)
-                        planner_service = PlannerService(
-                            session,
-                            planner_client,
-                            lane_capabilities=policy.lane_capabilities(),
-                        )
-                        pr = PullRequest(
-                            worker_id=worker.worker_id,
-                            lane=worker.lane,
-                            intent_id=intent.intent_id,
-                            repo_access_set=accessible_repos,
-                        )
-                        session.add(pr)
-                        session.commit()
-                        session.refresh(pr)
-                        _case, step = planner_service.plan_pull_request(pr.id, eligible_repo_heads)
-                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, worker.lane, intent.intent_id)
-                    except Exception as exc:
-                        logger.warning("JIT planning failed for lane %s: %s", worker.lane, exc)
-                        step = None
+                except PlanningUnavailableError as exc:
+                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Planning unavailable") from exc
 
             if step is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No eligible work")
 
-            service = ControlPlaneService(session)
+            service = _control_plane(session)
             try:
                 lease = service.issue_lease(step_id=step.id, worker_id=worker.worker_id, ttl_seconds=payload.ttl_seconds)
             except ValueError as exc:
@@ -215,7 +245,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found")
             if lease.worker_id != worker.worker_id:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="lease belongs to another worker")
-            service = ControlPlaneService(session)
+            service = _control_plane(session)
             try:
                 lease = service.heartbeat_lease(lease_id=lease_id, ttl_seconds=payload.ttl_seconds)
             except ValueError as exc:
@@ -243,7 +273,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     @app.post("/leases/expire")
     def expire_leases() -> dict:
         with session_factory() as session:
-            service = ControlPlaneService(session)
+            service = _control_plane(session)
             count = service.expire_leases()
             return {"expired_count": count}
 

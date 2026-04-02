@@ -17,5 +17,7 @@ class Settings(BaseSettings):
     planner_provider: Optional[str] = None
     planner_model: Optional[str] = None
     planner_api_key: Optional[str] = None
+    planner_command: str = "claude"
+    planner_effort: str = "max"
     planner_timeout: float = 60.0
     gateway_url: Optional[str] = None

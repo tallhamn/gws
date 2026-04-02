@@ -105,6 +105,7 @@ def test_worker_lease_returns_404_when_no_ready_steps(tmp_path, worker_registry_
     settings = Settings(
         database_url=f"sqlite+pysqlite:///{database_path}",
         workers_path=str(worker_registry_path),
+        planner_provider="unknown",
     )
     engine = make_engine(settings.database_url)
     Base.metadata.create_all(engine)
@@ -118,6 +119,35 @@ def test_worker_lease_returns_404_when_no_ready_steps(tmp_path, worker_registry_
     )
 
     assert response.status_code == 404
+
+
+def test_worker_lease_returns_503_when_jit_planning_is_unavailable(tmp_path, worker_registry_path):
+    from gws.models import IntentVersion
+
+    database_path = tmp_path / "api.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+        planner_provider="unknown",
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief"))
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/worker/lease",
+        json={"ttl_seconds": 60, "intent_id": "intent-1", "repo_heads": {"repo-a": "abc123"}},
+        headers=auth_headers("token-coder-1"),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Planning unavailable"}
 
 
 def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):

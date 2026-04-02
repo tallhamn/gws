@@ -29,6 +29,8 @@ Install a concrete planner backend only if you want to use one:
 .venv/bin/pip install -e ".[anthropic]"
 ```
 
+Planner selection prefers local Claude Code when `claude` is installed. That path uses your existing Claude Code login/session and defaults to `--effort max` for coding work. If you want the direct Anthropic API instead, set `GWS_PLANNER_PROVIDER=anthropic` and provide `GWS_PLANNER_API_KEY`. You can also force Claude Code explicitly with `GWS_PLANNER_PROVIDER=claude_code`.
+
 Worker identities for authenticated execution live in `workers.yaml`. Each entry maps a bearer token to a worker ID, lane, and repository access set.
 
 The public execution contract is:
@@ -46,7 +48,7 @@ The public execution contract is:
   - worker-token authenticated
   - submits result metadata for the step leased to the authenticated worker
 
-`policy.yaml` defines lane capabilities and governance triggers. `workers.yaml` defines worker identities. Both are runtime-configurable through `GWS_POLICY_PATH` and `GWS_WORKERS_PATH`.
+`policy.yaml` defines lane capabilities and governance triggers. `workers.yaml` defines worker identities. Both are runtime-configurable through `GWS_POLICY_PATH` and `GWS_WORKERS_PATH`. Planning and completion verification use the same configured policy file.
 
 ## Repository Layout
 
