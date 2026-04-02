@@ -381,7 +381,7 @@ def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(mo
         ]
     )
 
-    def fake_check_output(cmd, text):
+    def fake_check_output(cmd, text, timeout=None):
         assert text is True
         assert cmd == ["git", "-C", "/tmp/repo", "diff", "--unified=0", "base123", "head456"]
         return diff_text
