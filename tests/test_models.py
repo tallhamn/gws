@@ -252,6 +252,30 @@ def test_popitem_on_empty_dict_raises_key_error(session):
         pull.envelope.popitem()
 
 
+def test_intent_version_has_context_and_planner_guidance(session):
+    iv = IntentVersion(
+        intent_id="i-1",
+        intent_version=1,
+        brief_text="Build a platformer",
+        context="Browser game. HTML/CSS/JS output.",
+        planner_guidance="Prioritize core loop before polish.",
+    )
+    session.add(iv)
+    session.commit()
+    session.refresh(iv)
+    assert iv.context == "Browser game. HTML/CSS/JS output."
+    assert iv.planner_guidance == "Prioritize core loop before polish."
+
+
+def test_intent_version_context_defaults_empty(session):
+    iv = IntentVersion(intent_id="i-2", intent_version=1, brief_text="Build something")
+    session.add(iv)
+    session.commit()
+    session.refresh(iv)
+    assert iv.context == ""
+    assert iv.planner_guidance == ""
+
+
 def test_make_engine_uses_static_pool_for_in_memory_sqlite():
     engine = make_engine("sqlite+pysqlite:///:memory:")
     metadata = MetaData()
