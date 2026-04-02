@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from typing import Optional
 import weakref
 
-from sqlalchemy import CheckConstraint, DateTime, Enum, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, event, inspect, text
+from sqlalchemy import DateTime, Enum, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, event, inspect, text
 from sqlalchemy.ext.mutable import Mutable, MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -22,17 +22,6 @@ def _enum_column(enum_cls: type[enum.Enum]) -> Enum:
         native_enum=False,
         create_constraint=True,
     )
-
-
-class StepStatus(str, enum.Enum):
-    PLANNING = "planning"
-    READY = "ready"
-    LEASED = "leased"
-    RUNNING = "running"
-    VERIFYING = "verifying"
-    SUCCEEDED = "succeeded"
-    FAILED = "failed"
-    REVOKED = "revoked"
 
 
 class VerdictResult(str, enum.Enum):
@@ -301,7 +290,6 @@ class IntentVersion(Base):
     planner_guidance: Mapped[str] = mapped_column(Text, default="")
     accepted_amendments: Mapped[list[dict]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    cases: Mapped[list["Case"]] = relationship(back_populates="intent_version_ref")
 
 
 class Outcome(Base):
@@ -482,69 +470,9 @@ class AmendmentProposal(Base):
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
-class Case(Base):
-    __tablename__ = "cases"
-    __table_args__ = (
-        ForeignKeyConstraint(
-            ["intent_id", "intent_version"],
-            ["intent_versions.intent_id", "intent_versions.intent_version"],
-            name="fk_cases_intent_versions",
-        ),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    intent_id: Mapped[str] = mapped_column(String(128), index=True)
-    intent_version: Mapped[int] = mapped_column(Integer)
-    title: Mapped[str] = mapped_column(String(255))
-    goal: Mapped[str] = mapped_column(Text)
-    status: Mapped[str] = mapped_column(String(32), default="open")
-    workflow_status: Mapped[str] = mapped_column(String(32), default="active")
-    steps: Mapped[list["Step"]] = relationship(back_populates="case")
-    intent_version_ref: Mapped[IntentVersion] = relationship(back_populates="cases")
-
-
-class Step(Base):
-    __tablename__ = "steps"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    case_id: Mapped[int] = mapped_column(ForeignKey("cases.id"))
-    repo: Mapped[str] = mapped_column(String(255), index=True)
-    lane: Mapped[str] = mapped_column(String(64), index=True)
-    step_type: Mapped[str] = mapped_column(String(64))
-    status: Mapped[StepStatus] = mapped_column(
-        Enum(
-            StepStatus,
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-            validate_strings=True,
-            native_enum=False,
-            create_constraint=True,
-        ),
-        default=StepStatus.PLANNING,
-    )
-    allowed_paths: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
-    forbidden_paths: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
-    base_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    target_branch: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    artifact_requirements: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
-    case: Mapped[Case] = relationship(back_populates="steps")
-    leases: Mapped[list["Lease"]] = relationship(back_populates="step")
-    attempts: Mapped[list["Attempt"]] = relationship(back_populates="step")
-
-
 class Lease(Base):
     __tablename__ = "leases"
     __table_args__ = (
-        CheckConstraint(
-            "(step_id IS NOT NULL AND work_item_id IS NULL) OR (step_id IS NULL AND work_item_id IS NOT NULL)",
-            name="ck_leases_exactly_one_target",
-        ),
-        Index(
-            "uq_leases_active_step_id",
-            "step_id",
-            unique=True,
-            postgresql_where=text("expired_at IS NULL"),
-            sqlite_where=text("expired_at IS NULL"),
-        ),
         Index(
             "uq_leases_active_work_item_id",
             "work_item_id",
@@ -555,8 +483,7 @@ class Lease(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    step_id: Mapped[Optional[int]] = mapped_column(ForeignKey("steps.id"), index=True, nullable=True)
-    work_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("work_items.id"), index=True, nullable=True)
+    work_item_id: Mapped[int] = mapped_column(ForeignKey("work_items.id"), index=True)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
     issued_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
@@ -564,8 +491,7 @@ class Lease(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     expired_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     base_commit: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    step: Mapped[Step] = relationship(back_populates="leases")
-    work_item: Mapped[Optional["WorkItem"]] = relationship(back_populates="leases")
+    work_item: Mapped["WorkItem"] = relationship(back_populates="leases")
     attempt: Mapped[Optional["Attempt"]] = relationship(back_populates="lease", uselist=False)
 
 
@@ -573,15 +499,10 @@ class Attempt(Base):
     __tablename__ = "attempts"
     __table_args__ = (
         UniqueConstraint("lease_id", name="uq_attempts_lease_id"),
-        CheckConstraint(
-            "(step_id IS NOT NULL AND work_item_id IS NULL) OR (step_id IS NULL AND work_item_id IS NOT NULL)",
-            name="ck_attempts_exactly_one_target",
-        ),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    step_id: Mapped[Optional[int]] = mapped_column(ForeignKey("steps.id"), index=True, nullable=True)
-    work_item_id: Mapped[Optional[int]] = mapped_column(ForeignKey("work_items.id"), index=True, nullable=True)
+    work_item_id: Mapped[int] = mapped_column(ForeignKey("work_items.id"), index=True)
     lease_id: Mapped[int] = mapped_column(ForeignKey("leases.id"), nullable=False)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     repo: Mapped[str] = mapped_column(String(255), index=True)
@@ -598,8 +519,7 @@ class Attempt(Base):
     artifact_refs: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     submitted_diff_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
-    step: Mapped[Optional[Step]] = relationship(back_populates="attempts")
-    work_item: Mapped[Optional["WorkItem"]] = relationship(back_populates="attempts")
+    work_item: Mapped["WorkItem"] = relationship(back_populates="attempts")
     lease: Mapped[Lease] = relationship(back_populates="attempt")
     verdicts: Mapped[list["Verdict"]] = relationship(back_populates="attempt")
 
@@ -661,5 +581,4 @@ event.listen(Outcome, "before_update", _validate_outcome_current_work_item_scope
 event.listen(WorkItem, "before_update", _validate_work_item_reassignment_scope, propagate=True)
 event.listen(OutcomeEvent, "before_update", _prevent_outcome_event_update, propagate=True)
 event.listen(OutcomeEvent, "before_delete", _prevent_outcome_event_delete, propagate=True)
-event.listen(Step, "init", _init_json_defaults, propagate=True)
 event.listen(Attempt, "init", _init_json_defaults, propagate=True)

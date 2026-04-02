@@ -7,7 +7,6 @@ from sqlalchemy.pool import StaticPool
 
 from gws.db import make_engine
 from gws.models import (
-    Case,
     IntentVersion,
     Outcome,
     OutcomeEvent,
@@ -15,8 +14,6 @@ from gws.models import (
     OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
-    Step,
-    StepStatus,
     WorkItem,
     WorkItemStatus,
 )
@@ -70,13 +67,52 @@ def test_intent_versions_are_unique_per_intent_and_version(session):
         session.commit()
 
 
-def test_case_references_existing_intent_version(session):
-    session.execute(text("PRAGMA foreign_keys=ON"))
+def test_legacy_case_and_step_runtime_models_are_gone():
+    import gws.models as models
 
-    session.add(Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music"))
+    assert not hasattr(models, "Case")
+    assert not hasattr(models, "Step")
+    assert not hasattr(models, "StepStatus")
 
-    with pytest.raises(IntegrityError):
-        session.commit()
+
+def test_lease_and_attempt_persist_with_required_work_item_target(session):
+    from gws.models import Attempt, AttemptResultStatus, IntentVersion, Lease, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    session.add_all([intent, outcome, work_item])
+    session.commit()
+
+    lease = Lease(
+        work_item_id=work_item.id,
+        worker_id="worker-1",
+        lane="coder",
+        heartbeat_deadline=work_item.created_at,
+        expires_at=work_item.created_at,
+    )
+    session.add(lease)
+    session.flush()
+
+    attempt = Attempt(
+        work_item_id=work_item.id,
+        lease_id=lease.id,
+        worker_id="worker-1",
+        repo="repo-a",
+        result_status=AttemptResultStatus.PENDING,
+    )
+    session.add(attempt)
+    session.commit()
+
+    assert session.get(Lease, lease.id).work_item_id == work_item.id
+    assert session.get(Attempt, attempt.id).work_item_id == work_item.id
 
 
 def test_json_payload_mutations_persist_after_commit(session):
@@ -180,9 +216,7 @@ def test_nested_json_payload_mutations_persist_after_commit(session):
         available_repos=["repo-a"],
         planning_context={"limits": {"max_runtime": 10}},
     )
-    step = Step(case=Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music"), repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-
-    session.add_all([intent, outcome, planning, step.case, step])
+    session.add_all([intent, outcome, planning])
     session.commit()
 
     intent.accepted_amendments[0]["path"] = "b"
@@ -196,34 +230,6 @@ def test_nested_json_payload_mutations_persist_after_commit(session):
     assert reloaded_intent.accepted_amendments[0]["path"] == "b"
     assert reloaded_planning.planning_context["limits"]["max_runtime"] == 30
 
-
-def test_step_status_persists_lowercase_value(session):
-    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
-    session.commit()
-
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    session.add(case)
-
-    step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
-    session.add(step)
-    session.commit()
-
-    stored_status = session.execute(text("select status from steps where id = :id"), {"id": step.id}).scalar_one()
-
-    assert stored_status == StepStatus.READY.value
-    assert session.get(Step, step.id).status is StepStatus.READY
-
-
-def test_step_status_rejects_invalid_raw_strings(session):
-    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
-    session.commit()
-
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status="not-a-valid-status")
-    session.add(step)
-
-    with pytest.raises((StatementError, IntegrityError, ValueError)):
-        session.commit()
 
 
 def test_replaced_nested_list_items_stop_dirtying_old_parent(session):
