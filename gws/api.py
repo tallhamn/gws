@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, status
@@ -10,6 +11,8 @@ from .config import Settings
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
 from .models import PullRequest
+
+logger = logging.getLogger(__name__)
 
 
 class PullRequestCreate(BaseModel):
@@ -22,6 +25,15 @@ class PullRequestCreate(BaseModel):
 
 class PullRequestResponse(BaseModel):
     status: str
+
+
+class LeaseRequest(BaseModel):
+    worker_id: str
+    ttl_seconds: int = 60
+
+
+class HeartbeatRequest(BaseModel):
+    ttl_seconds: int = 60
 
 
 class CompletedDiffIn(BaseModel):
@@ -39,6 +51,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         pool_pre_ping=settings.db_pool_pre_ping,
     )
     Base.metadata.create_all(engine)
+    logger.info("GWS app created, database_url=%s", settings.database_url.split("@")[-1])
 
     if settings.api_key:
 
@@ -48,6 +61,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 return await call_next(request)
             auth = request.headers.get("Authorization", "")
             if not auth.startswith("Bearer ") or auth[7:] != settings.api_key:
+                logger.warning("Unauthorized request to %s", request.url.path)
                 return JSONResponse(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     content={"detail": "Invalid or missing API key"},
@@ -72,6 +86,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             session.add(pull_request)
             session.commit()
             session.refresh(pull_request)
+            logger.info("Pull request %d created by worker %s for lane %s", pull_request.id, payload.worker_id, payload.lane)
 
             return {"pull_request_id": pull_request.id}
 
@@ -95,9 +110,49 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     changed_hunks=payload.changed_hunks,
                 )
             except ValueError as exc:
+                logger.warning("Step %d completion failed: %s", step_id, str(exc))
                 if str(exc) == f"unknown step_id: {step_id}":
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            logger.info("Step %d completed, status=%s", step_id, "processed")
             return {"status": "processed"}
+
+    @app.post("/lanes/{lane}/pull")
+    def pull_step(lane: str, payload: LeaseRequest) -> dict:
+        with session_factory() as session:
+            from .models import Step, StepStatus
+            step = (
+                session.query(Step)
+                .filter(Step.lane == lane, Step.status == StepStatus.READY)
+                .order_by(Step.id)
+                .first()
+            )
+            if step is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No ready steps in lane: {lane}")
+            service = ControlPlaneService(session)
+            try:
+                lease = service.issue_lease(step_id=step.id, worker_id=payload.worker_id, ttl_seconds=payload.ttl_seconds)
+            except ValueError as exc:
+                raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+            return {"lease_id": lease.id, "step_id": step.id}
+
+    @app.post("/leases/{lease_id}/heartbeat")
+    def heartbeat_lease(lease_id: int, payload: HeartbeatRequest) -> dict:
+        with session_factory() as session:
+            service = ControlPlaneService(session)
+            try:
+                lease = service.heartbeat_lease(lease_id=lease_id, ttl_seconds=payload.ttl_seconds)
+            except ValueError as exc:
+                if "unknown lease_id" in str(exc):
+                    raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found") from exc
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+            return {"lease_id": lease.id, "heartbeat_deadline": lease.heartbeat_deadline.isoformat()}
+
+    @app.post("/leases/expire")
+    def expire_leases() -> dict:
+        with session_factory() as session:
+            service = ControlPlaneService(session)
+            count = service.expire_leases()
+            return {"expired_count": count}
 
     return app
