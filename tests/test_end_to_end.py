@@ -42,7 +42,7 @@ def test_completed_diff_appends_security_review_step_via_api(tmp_path, worker_re
     client = TestClient(app)
 
     response = client.post(
-        f"/steps/{step_id}/complete",
+        f"/worker/steps/{step_id}/complete",
         json={
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
@@ -54,7 +54,7 @@ def test_completed_diff_appends_security_review_step_via_api(tmp_path, worker_re
     assert response.json() == {"status": "processed"}
 
     retry_response = client.post(
-        f"/steps/{step_id}/complete",
+        f"/worker/steps/{step_id}/complete",
         json={
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
@@ -107,7 +107,7 @@ def test_completed_diff_rejects_expired_lease_via_api(tmp_path, worker_registry_
     client = TestClient(app)
 
     response = client.post(
-        f"/steps/{step_id}/complete",
+        f"/worker/steps/{step_id}/complete",
         json={
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
@@ -215,7 +215,7 @@ def test_completed_diff_rejects_non_owner_worker_via_api(tmp_path, worker_regist
     client = TestClient(app)
 
     response = client.post(
-        f"/steps/{step_id}/complete",
+        f"/worker/steps/{step_id}/complete",
         json={
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
@@ -265,7 +265,7 @@ def test_completed_diff_rejects_missing_authorization_via_api(tmp_path, worker_r
     client = TestClient(app)
 
     response = client.post(
-        f"/steps/{step_id}/complete",
+        f"/worker/steps/{step_id}/complete",
         json={
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],

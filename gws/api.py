@@ -10,36 +10,19 @@ from sqlalchemy.exc import IntegrityError
 
 from .auth import WorkerIdentity, WorkerRegistry, build_worker_auth_dependency
 from .config import Settings
+from .contracts import (
+    WorkerCompletionRequest,
+    WorkerCompletionResponse,
+    WorkerHeartbeatRequest,
+    WorkerHeartbeatResponse,
+    WorkerLeaseRequest,
+    WorkerLeaseResponse,
+)
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
-from .models import PullRequest
+from .models import Lease, PullRequest
 
 logger = logging.getLogger(__name__)
-
-
-class PullRequestCreate(BaseModel):
-    intent_id: str
-    envelope: dict = Field(default_factory=dict)
-
-
-class PullRequestResponse(BaseModel):
-    status: str
-
-
-class LeaseRequest(BaseModel):
-    worker_id: str
-    ttl_seconds: int = 60
-    repo_heads: dict[str, str] = Field(default_factory=dict)
-    intent_id: Optional[str] = None
-
-
-class HeartbeatRequest(BaseModel):
-    ttl_seconds: int = 60
-
-
-class CompletedDiffIn(BaseModel):
-    touched_paths: list[str]
-    changed_hunks: list[str]
 
 
 class IntentCreate(BaseModel):
@@ -67,16 +50,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         @app.middleware("http")
         async def check_api_key(request: Request, call_next):
-            worker_auth_route = (
-                (request.method == "POST" and request.url.path == "/pull-requests")
-                or (
-                    request.method == "POST"
-                    and request.url.path.startswith("/steps/")
-                    and request.url.path.endswith("/complete")
-                )
-            )
-            public_timeline_route = request.url.path.startswith("/public/intents/") and request.url.path.endswith("/timeline")
-            if request.url.path == "/healthz" or public_timeline_route or worker_auth_route:
+            if request.url.path == "/healthz" or request.url.path.startswith("/public/") or request.url.path.startswith("/worker/"):
                 return await call_next(request)
 
             auth = request.headers.get("Authorization", "")
@@ -92,56 +66,21 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def healthz() -> dict[str, str]:
         return {"status": "ok"}
 
-    @app.post("/pull-requests", status_code=status.HTTP_202_ACCEPTED)
-    def create_pull_request(
-        payload: PullRequestCreate,
-        worker: WorkerIdentity = Depends(require_worker),
-    ) -> dict[str, int]:
-        with session_factory() as session:
-            pull_request = PullRequest(
-                worker_id=worker.worker_id,
-                lane=worker.lane,
-                intent_id=payload.intent_id,
-                repo_access_set=list(worker.repo_access_set),
-                envelope=payload.envelope,
-            )
-
-            session.add(pull_request)
-            session.commit()
-            session.refresh(pull_request)
-            logger.info(
-                "Pull request %d created by worker %s for lane %s (intent=%s)",
-                pull_request.id,
-                worker.worker_id,
-                worker.lane,
-                payload.intent_id,
-            )
-
-            return {"pull_request_id": pull_request.id}
-
-    @app.get("/pull-requests/{pull_request_id}", response_model=PullRequestResponse)
-    def get_pull_request(pull_request_id: int) -> PullRequestResponse:
-        with session_factory() as session:
-            pull_request = session.get(PullRequest, pull_request_id)
-            if pull_request is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Pull request not found")
-
-            return PullRequestResponse(status=pull_request.status)
-
-    @app.post("/steps/{step_id}/complete")
-    async def complete_step(
+    async def _complete_step_for_worker(
+        *,
         step_id: int,
-        payload: CompletedDiffIn,
-        worker: WorkerIdentity = Depends(require_worker),
-    ) -> dict[str, str]:
+        touched_paths: list[str],
+        changed_hunks: list[str],
+        worker: WorkerIdentity,
+    ) -> WorkerCompletionResponse:
         with session_factory() as session:
             service = ControlPlaneService(session)
             try:
                 service.apply_completed_diff(
                     step_id=step_id,
                     worker_id=worker.worker_id,
-                    touched_paths=payload.touched_paths,
-                    changed_hunks=payload.changed_hunks,
+                    touched_paths=touched_paths,
+                    changed_hunks=changed_hunks,
                 )
             except PermissionError as exc:
                 raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
@@ -169,24 +108,41 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         step.status = StepStatus.FAILED
                         session.commit()
                         logger.info("Step %d artifact verification failed", step_id)
-                        return {"status": "artifact_verification_failed"}
+                        return WorkerCompletionResponse(status="artifact_verification_failed")
 
             logger.info("Step %d completed, status=%s", step_id, "processed")
-            return {"status": "processed"}
+            return WorkerCompletionResponse(status="processed")
 
-    @app.post("/lanes/{lane}/pull")
-    def pull_step(lane: str, payload: LeaseRequest) -> dict:
+    @app.post("/worker/lease", response_model=WorkerLeaseResponse)
+    def lease_work(
+        payload: WorkerLeaseRequest,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> WorkerLeaseResponse:
         with session_factory() as session:
             from .models import IntentVersion, Step, StepStatus
+            from .planner import PlannerService
+            from .planner_client import build_planner_client
+            from .policy import PolicyEngine
+
+            accessible_repos = list(worker.repo_access_set)
+            eligible_repo_heads = {
+                repo: head
+                for repo, head in payload.repo_heads.items()
+                if repo in worker.repo_access_set
+            }
 
             step = (
                 session.query(Step)
-                .filter(Step.lane == lane, Step.status == StepStatus.READY)
+                .filter(
+                    Step.lane == worker.lane,
+                    Step.status == StepStatus.READY,
+                    Step.repo.in_(accessible_repos),
+                )
                 .order_by(Step.id)
                 .first()
             )
 
-            if step is None and payload.repo_heads:
+            if step is None and eligible_repo_heads:
                 if payload.intent_id:
                     intent = (
                         session.query(IntentVersion)
@@ -202,58 +158,63 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         .first()
                     )
                 if intent is not None:
-                    from .planner import PlannerService
-                    from .planner_client import build_planner_client
-                    from .policy import PolicyEngine
-
                     try:
                         planner_client = build_planner_client(settings)
-                        policy = PolicyEngine.from_file("policy.yaml")
+                        policy = PolicyEngine.from_file(settings.policy_path)
                         planner_service = PlannerService(
                             session,
                             planner_client,
                             lane_capabilities=policy.lane_capabilities(),
                         )
                         pr = PullRequest(
-                            worker_id=payload.worker_id,
-                            lane=lane,
+                            worker_id=worker.worker_id,
+                            lane=worker.lane,
                             intent_id=intent.intent_id,
-                            repo_access_set=list(payload.repo_heads.keys()),
+                            repo_access_set=accessible_repos,
                         )
                         session.add(pr)
                         session.commit()
                         session.refresh(pr)
-                        _case, step = planner_service.plan_pull_request(pr.id, payload.repo_heads)
-                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, lane, intent.intent_id)
+                        _case, step = planner_service.plan_pull_request(pr.id, eligible_repo_heads)
+                        logger.info("JIT planned step %d for lane %s (intent=%s)", step.id, worker.lane, intent.intent_id)
                     except Exception as exc:
-                        logger.warning("JIT planning failed for lane %s: %s", lane, exc)
+                        logger.warning("JIT planning failed for lane %s: %s", worker.lane, exc)
                         step = None
 
             if step is None:
-                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"No ready steps in lane: {lane}")
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No eligible work")
 
             service = ControlPlaneService(session)
             try:
-                lease = service.issue_lease(step_id=step.id, worker_id=payload.worker_id, ttl_seconds=payload.ttl_seconds)
+                lease = service.issue_lease(step_id=step.id, worker_id=worker.worker_id, ttl_seconds=payload.ttl_seconds)
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-            return {
-                "lease_id": lease.id,
-                "step_id": step.id,
-                "title": step.case.title,
-                "goal": step.case.goal,
-                "repo": step.repo,
-                "lane": step.lane,
-                "step_type": step.step_type,
-                "allowed_paths": list(step.allowed_paths),
-                "forbidden_paths": list(step.forbidden_paths),
-                "base_commit": step.base_commit,
-                "artifact_requirements": list(step.artifact_requirements),
-            }
+            return WorkerLeaseResponse(
+                lease_id=lease.id,
+                step_id=step.id,
+                title=step.case.title,
+                goal=step.case.goal,
+                repo=step.repo,
+                step_type=step.step_type,
+                allowed_paths=list(step.allowed_paths),
+                forbidden_paths=list(step.forbidden_paths),
+                base_commit=step.base_commit,
+                artifact_requirements=list(step.artifact_requirements),
+                heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
+            )
 
-    @app.post("/leases/{lease_id}/heartbeat")
-    def heartbeat_lease(lease_id: int, payload: HeartbeatRequest) -> dict:
+    @app.post("/worker/leases/{lease_id}/heartbeat", response_model=WorkerHeartbeatResponse)
+    def heartbeat_worker_lease(
+        lease_id: int,
+        payload: WorkerHeartbeatRequest,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> WorkerHeartbeatResponse:
         with session_factory() as session:
+            lease = session.get(Lease, lease_id)
+            if lease is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found")
+            if lease.worker_id != worker.worker_id:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="lease belongs to another worker")
             service = ControlPlaneService(session)
             try:
                 lease = service.heartbeat_lease(lease_id=lease_id, ttl_seconds=payload.ttl_seconds)
@@ -261,7 +222,23 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 if "unknown lease_id" in str(exc):
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lease not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-            return {"lease_id": lease.id, "heartbeat_deadline": lease.heartbeat_deadline.isoformat()}
+            return WorkerHeartbeatResponse(
+                lease_id=lease.id,
+                heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
+            )
+
+    @app.post("/worker/steps/{step_id}/complete", response_model=WorkerCompletionResponse)
+    async def complete_worker_step(
+        step_id: int,
+        payload: WorkerCompletionRequest,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> WorkerCompletionResponse:
+        return await _complete_step_for_worker(
+            step_id=step_id,
+            touched_paths=payload.touched_paths,
+            changed_hunks=payload.changed_hunks,
+            worker=worker,
+        )
 
     @app.post("/leases/expire")
     def expire_leases() -> dict:

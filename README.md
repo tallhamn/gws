@@ -29,11 +29,24 @@ Install a concrete planner backend only if you want to use one:
 .venv/bin/pip install -e ".[anthropic]"
 ```
 
-Worker identities for authenticated pull-request creation live in `workers.yaml`. Each entry maps a bearer token to a worker ID, lane, and repository access set.
+Worker identities for authenticated execution live in `workers.yaml`. Each entry maps a bearer token to a worker ID, lane, and repository access set.
 
-`POST /pull-requests` requires `Authorization: Bearer <token>` and derives the worker identity server-side. The request body needs `intent_id` plus the envelope payload.
+The public execution contract is:
 
-`POST /steps/{step_id}/complete` also requires `Authorization: Bearer <token>` and only accepts completion from the worker that owns the active lease.
+- `POST /intents`
+  - control-plane authenticated
+  - creates a new immutable intent version
+- `POST /worker/lease`
+  - worker-token authenticated
+  - leases ready work or triggers JIT planning when repo heads are available
+- `POST /worker/leases/{lease_id}/heartbeat`
+  - worker-token authenticated
+  - extends a lease owned by the authenticated worker
+- `POST /worker/steps/{step_id}/complete`
+  - worker-token authenticated
+  - submits result metadata for the step leased to the authenticated worker
+
+`policy.yaml` defines lane capabilities and governance triggers. `workers.yaml` defines worker identities. Both are runtime-configurable through `GWS_POLICY_PATH` and `GWS_WORKERS_PATH`.
 
 ## Repository Layout
 
