@@ -14,6 +14,7 @@ from .models import PullRequest
 class PullRequestCreate(BaseModel):
     worker_id: str
     lane: str
+    intent_id: str
     repo_access_set: list[str] = Field(default_factory=list)
     envelope: dict = Field(default_factory=dict)
 
@@ -43,6 +44,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             pull_request = PullRequest(
                 worker_id=payload.worker_id,
                 lane=payload.lane,
+                intent_id=payload.intent_id,
                 repo_access_set=payload.repo_access_set,
                 envelope=payload.envelope,
             )

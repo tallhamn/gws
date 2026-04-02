@@ -32,6 +32,7 @@ def test_create_and_fetch_pull_request(tmp_path):
         json={
             "worker_id": "worker-1",
             "lane": "control",
+            "intent_id": "intent-1",
             "repo_access_set": ["repo-a", "repo-b"],
             "envelope": {"branch": "feature/control-plane"},
         },
@@ -73,6 +74,7 @@ def test_create_pull_request_ignores_client_supplied_status(tmp_path):
         json={
             "worker_id": "worker-2",
             "lane": "control",
+            "intent_id": "intent-1",
             "repo_access_set": ["repo-a"],
             "envelope": {"branch": "feature/ignore-status"},
             "status": "completed",

@@ -29,11 +29,12 @@ class PlannerService:
 
         active_intent = (
             self.session.query(IntentVersion)
-            .order_by(IntentVersion.created_at.desc(), IntentVersion.id.desc())
+            .filter(IntentVersion.intent_id == pull.intent_id)
+            .order_by(IntentVersion.intent_version.desc())
             .first()
         )
         if active_intent is None:
-            raise ValueError("no active intent version")
+            raise ValueError(f"no active intent version for intent_id: {pull.intent_id}")
 
         plan = self.planner_client.synthesize(
             brief=active_intent.brief_text,

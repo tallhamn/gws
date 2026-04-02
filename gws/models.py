@@ -277,6 +277,7 @@ class PullRequest(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
+    intent_id: Mapped[str] = mapped_column(String(128), index=True)
     repo_access_set: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     envelope: Mapped[dict] = mapped_column(DeepMutableDict.as_mutable(JSON), default=dict)
     repo_heads: Mapped[dict] = mapped_column(DeepMutableDict.as_mutable(JSON), default=dict)

@@ -128,7 +128,7 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
 
 def test_planner_materializes_single_case_and_ready_step(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"], envelope={"max_runtime": 900})
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"max_runtime": 900})
     session.add_all([intent, pull])
     session.commit()
 
@@ -181,7 +181,7 @@ def test_planner_materializes_single_case_and_ready_step(session):
 
 def test_planner_copies_step_base_commit_from_selected_repo_head(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a", "repo-b"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a", "repo-b"])
     session.add_all([intent, pull])
     session.commit()
 
@@ -205,7 +205,7 @@ def test_planner_copies_step_base_commit_from_selected_repo_head(session):
 
 
 def test_planner_errors_when_no_active_intent_version_exists(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     session.add(pull)
     session.commit()
 
@@ -226,14 +226,14 @@ def test_planner_errors_when_no_active_intent_version_exists(session):
     try:
         planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
     except ValueError as exc:
-        assert str(exc) == "no active intent version"
+        assert str(exc) == "no active intent version for intent_id: intent-1"
     else:
         raise AssertionError("expected ValueError")
 
 
 def test_planner_rejects_selected_repo_outside_pull_access_set(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     session.add_all([intent, pull])
     session.commit()
 
@@ -270,7 +270,7 @@ def test_planner_rejects_selected_repo_outside_pull_access_set(session):
 
 def test_planner_rejects_malformed_plan_without_mutating_state(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     session.add_all([intent, pull])
     session.commit()
 
@@ -306,7 +306,7 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
 
 def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     session.add_all([intent, pull])
     session.commit()
 
@@ -331,7 +331,7 @@ def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
 
 def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     session.add_all([intent, pull])
     session.commit()
 
