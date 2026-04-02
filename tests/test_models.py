@@ -15,7 +15,6 @@ from gws.models import (
     OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
-    PullRequest,
     Step,
     StepStatus,
     WorkItem,
@@ -23,19 +22,42 @@ from gws.models import (
 )
 
 
-def test_can_persist_intent_case_and_step(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
+def test_legacy_pull_request_runtime_model_is_gone():
+    import gws.models as models
 
-    session.add_all([intent, pull, case, step])
+    assert not hasattr(models, "PullRequest")
+
+
+def test_can_persist_intent_outcome_planning_session_and_work_item(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="coder-1",
+        lane="coder",
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        available_repos=["repo-a"],
+        repo_heads={"repo-a": "abc123"},
+        planning_context={"brief": "ship /music"},
+    )
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+
+    session.add_all([intent, outcome, planning, work_item])
     session.commit()
     session.expunge_all()
 
     assert session.get(IntentVersion, intent.id).brief_text == "ship /music"
-    assert session.get(Case, case.id).intent_version_ref.brief_text == "ship /music"
-    assert session.get(Step, step.id).status is StepStatus.READY
+    assert session.get(Outcome, outcome.id).intent_id == "intent-1"
+    assert session.get(PlanningSession, planning.id).status is PlanningSessionStatus.PENDING
+    assert session.get(WorkItem, work_item.id).status is WorkItemStatus.READY
 
 
 def test_intent_versions_are_unique_per_intent_and_version(session):
@@ -59,70 +81,86 @@ def test_case_references_existing_intent_version(session):
 
 def test_json_payload_mutations_persist_after_commit(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music", accepted_amendments=[{"path": "a"}])
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"mode": "strict"})
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    step = Step(
-        case=case,
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="coder-1",
+        lane="coder",
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        available_repos=["repo-a"],
+        repo_heads={"repo-a": "abc123"},
+        planning_context={"mode": "strict"},
+    )
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
         repo="repo-a",
         lane="coder",
-        step_type="execute",
-        status=StepStatus.READY,
+        work_type="execute",
+        status=WorkItemStatus.READY,
         allowed_paths=["services/**"],
         forbidden_paths=["tests/**"],
         artifact_requirements=["diff"],
     )
 
-    session.add_all([intent, pull, case, step])
+    session.add_all([intent, outcome, planning, work_item])
     session.commit()
 
     intent.accepted_amendments.append({"path": "b"})
-    pull.repo_access_set.append("repo-b")
-    pull.envelope["mode"] = "relaxed"
-    step.allowed_paths.append("docs/**")
-    step.forbidden_paths.append("infra/**")
-    step.artifact_requirements.append("summary")
+    planning.available_repos.append("repo-b")
+    planning.planning_context["mode"] = "relaxed"
+    work_item.allowed_paths.append("docs/**")
+    work_item.forbidden_paths.append("infra/**")
+    work_item.artifact_requirements.append("summary")
     session.commit()
     session.expunge_all()
 
     reloaded_intent = session.get(IntentVersion, intent.id)
-    reloaded_pull = session.get(PullRequest, pull.id)
-    reloaded_step = session.get(Step, step.id)
+    reloaded_planning = session.get(PlanningSession, planning.id)
+    reloaded_work_item = session.get(WorkItem, work_item.id)
 
     assert reloaded_intent.accepted_amendments == [{"path": "a"}, {"path": "b"}]
-    assert reloaded_pull.repo_access_set == ["repo-a", "repo-b"]
-    assert reloaded_pull.envelope == {"mode": "relaxed"}
-    assert reloaded_step.allowed_paths == ["services/**", "docs/**"]
-    assert reloaded_step.forbidden_paths == ["tests/**", "infra/**"]
-    assert reloaded_step.artifact_requirements == ["diff", "summary"]
+    assert reloaded_planning.available_repos == ["repo-a", "repo-b"]
+    assert reloaded_planning.planning_context == {"mode": "relaxed"}
+    assert reloaded_work_item.allowed_paths == ["services/**", "docs/**"]
+    assert reloaded_work_item.forbidden_paths == ["tests/**", "infra/**"]
+    assert reloaded_work_item.artifact_requirements == ["diff", "summary"]
 
 
 def test_fresh_instances_support_json_defaults_before_flush(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1")
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="coder-1",
+        lane="coder",
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+    )
+    work_item = WorkItem(outcome=outcome, sequence_index=0, repo="repo-a", lane="coder", work_type="execute", status=WorkItemStatus.READY)
 
     intent.accepted_amendments.append({"path": "a", "meta": {"owner": "alice"}})
-    pull.repo_access_set.append("repo-a")
-    pull.envelope["limits"] = {"max_runtime": 10}
-    step.allowed_paths.append("services/**")
-    step.forbidden_paths.append("tests/**")
-    step.artifact_requirements.append("diff")
+    planning.available_repos.append("repo-a")
+    planning.planning_context["limits"] = {"max_runtime": 10}
+    work_item.allowed_paths.append("services/**")
+    work_item.forbidden_paths.append("tests/**")
+    work_item.artifact_requirements.append("diff")
 
-    session.add_all([intent, pull, case, step])
+    session.add_all([intent, outcome, planning, work_item])
     session.commit()
     session.expunge_all()
 
     reloaded_intent = session.get(IntentVersion, intent.id)
-    reloaded_pull = session.get(PullRequest, pull.id)
-    reloaded_step = session.get(Step, step.id)
+    reloaded_planning = session.get(PlanningSession, planning.id)
+    reloaded_work_item = session.get(WorkItem, work_item.id)
 
     assert reloaded_intent.accepted_amendments == [{"path": "a", "meta": {"owner": "alice"}}]
-    assert reloaded_pull.repo_access_set == ["repo-a"]
-    assert reloaded_pull.envelope == {"limits": {"max_runtime": 10}}
-    assert reloaded_step.allowed_paths == ["services/**"]
-    assert reloaded_step.forbidden_paths == ["tests/**"]
-    assert reloaded_step.artifact_requirements == ["diff"]
+    assert reloaded_planning.available_repos == ["repo-a"]
+    assert reloaded_planning.planning_context == {"limits": {"max_runtime": 10}}
+    assert reloaded_work_item.allowed_paths == ["services/**"]
+    assert reloaded_work_item.forbidden_paths == ["tests/**"]
+    assert reloaded_work_item.artifact_requirements == ["diff"]
 
 
 def test_nested_json_payload_mutations_persist_after_commit(session):
@@ -132,29 +170,31 @@ def test_nested_json_payload_mutations_persist_after_commit(session):
         brief_text="ship /music",
         accepted_amendments=[{"path": "a", "meta": {"owner": "alice"}}],
     )
-    pull = PullRequest(
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    planning = PlanningSession(
+        outcome=outcome,
         worker_id="coder-1",
         lane="coder",
-        intent_id="intent-1",
-        repo_access_set=["repo-a"],
-        envelope={"limits": {"max_runtime": 10}},
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        available_repos=["repo-a"],
+        planning_context={"limits": {"max_runtime": 10}},
     )
-    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
-    step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
+    step = Step(case=Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music"), repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
 
-    session.add_all([intent, pull, case, step])
+    session.add_all([intent, outcome, planning, step.case, step])
     session.commit()
 
     intent.accepted_amendments[0]["path"] = "b"
-    pull.envelope["limits"]["max_runtime"] = 30
+    planning.planning_context["limits"]["max_runtime"] = 30
     session.commit()
     session.expunge_all()
 
     reloaded_intent = session.get(IntentVersion, intent.id)
-    reloaded_pull = session.get(PullRequest, pull.id)
+    reloaded_planning = session.get(PlanningSession, planning.id)
 
     assert reloaded_intent.accepted_amendments[0]["path"] == "b"
-    assert reloaded_pull.envelope["limits"]["max_runtime"] == 30
+    assert reloaded_planning.planning_context["limits"]["max_runtime"] == 30
 
 
 def test_step_status_persists_lowercase_value(session):
@@ -208,19 +248,28 @@ def test_replaced_nested_list_items_stop_dirtying_old_parent(session):
 
 
 def test_removed_nested_dict_entries_stop_dirtying_old_parent(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"limits": {"max_runtime": 10}})
-    session.add(pull)
+    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
+    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    planning = PlanningSession(
+        outcome=outcome,
+        worker_id="coder-1",
+        lane="coder",
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+        planning_context={"limits": {"max_runtime": 10}},
+    )
+    session.add_all([outcome, planning])
     session.commit()
 
-    old_limits = pull.envelope["limits"]
-    del pull.envelope["limits"]
+    old_limits = planning.planning_context["limits"]
+    del planning.planning_context["limits"]
     old_limits["max_runtime"] = 999
     session.commit()
     session.expunge_all()
 
-    reloaded_pull = session.get(PullRequest, pull.id)
+    reloaded_planning = session.get(PlanningSession, planning.id)
 
-    assert reloaded_pull.envelope == {}
+    assert reloaded_planning.planning_context == {}
 
 
 def test_removed_list_item_stops_dirtying_old_parent(session):
@@ -260,10 +309,16 @@ def test_deleted_list_item_stops_dirtying_old_parent(session):
 
 
 def test_popitem_on_empty_dict_raises_key_error(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1")
+    planning = PlanningSession(
+        outcome=Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music"),
+        worker_id="coder-1",
+        lane="coder",
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+    )
 
     with pytest.raises(KeyError):
-        pull.envelope.popitem()
+        planning.planning_context.popitem()
 
 
 def test_intent_version_has_context_and_planner_guidance(session):

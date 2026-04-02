@@ -482,20 +482,6 @@ class AmendmentProposal(Base):
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
-class PullRequest(Base):
-    __tablename__ = "pull_requests"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    worker_id: Mapped[str] = mapped_column(String(128), index=True)
-    lane: Mapped[str] = mapped_column(String(64), index=True)
-    intent_id: Mapped[str] = mapped_column(String(128), index=True)
-    repo_access_set: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
-    envelope: Mapped[dict] = mapped_column(DeepMutableDict.as_mutable(JSON), default=dict)
-    repo_heads: Mapped[dict] = mapped_column(DeepMutableDict.as_mutable(JSON), default=dict)
-    planning_result: Mapped[dict] = mapped_column(DeepMutableDict.as_mutable(JSON), default=dict)
-    status: Mapped[str] = mapped_column(String(32), default="pending")
-
-
 class Case(Base):
     __tablename__ = "cases"
     __table_args__ = (
@@ -675,6 +661,5 @@ event.listen(Outcome, "before_update", _validate_outcome_current_work_item_scope
 event.listen(WorkItem, "before_update", _validate_work_item_reassignment_scope, propagate=True)
 event.listen(OutcomeEvent, "before_update", _prevent_outcome_event_update, propagate=True)
 event.listen(OutcomeEvent, "before_delete", _prevent_outcome_event_delete, propagate=True)
-event.listen(PullRequest, "init", _init_json_defaults, propagate=True)
 event.listen(Step, "init", _init_json_defaults, propagate=True)
 event.listen(Attempt, "init", _init_json_defaults, propagate=True)

@@ -6,13 +6,10 @@ from gws.config import Settings
 from gws.control_plane import ControlPlaneService
 from gws.db import Base, make_session_factory
 from gws.models import (
-    Case,
     IntentVersion,
     Outcome,
     OutcomePhase,
     OutcomeResult,
-    Step,
-    StepStatus,
     Verdict,
     WorkItem,
     WorkItemStatus,
@@ -139,64 +136,6 @@ def test_completed_diff_rejects_expired_lease_via_api(tmp_path, worker_registry_
     assert work_item is not None
     assert work_item.status == WorkItemStatus.READY
     assert verdicts == []
-
-
-def test_full_flow_intent_to_step_completion(session):
-    """Intent creation -> pull request -> plan -> lease -> execute -> submit -> verify."""
-    from gws.models import PullRequest
-    from gws.planner import PlannerService
-
-    intent = IntentVersion(
-        intent_id="game-1",
-        intent_version=1,
-        brief_text="Build a browser platformer",
-        context="HTML/CSS/JS output. Pixel art style.",
-        planner_guidance="Core loop before polish.",
-    )
-    session.add(intent)
-    session.commit()
-
-    pr = PullRequest(
-        worker_id="coder1",
-        lane="coder",
-        intent_id="game-1",
-        repo_access_set=["studio-ystackai"],
-    )
-    session.add(pr)
-    session.commit()
-
-    class MockPlanner:
-        def synthesize(self, *, brief, lane, repo_heads, envelope, **kwargs):
-            assert "lane_capabilities" in kwargs or kwargs.get("lane_capabilities") is None
-            return {
-                "title": "Build player movement",
-                "goal": "Implement WASD controls",
-                "repo": "studio-ystackai",
-                "allowed_paths": ["src/**"],
-                "forbidden_paths": [],
-                "step_type": "execute",
-            }
-
-    planner_service = PlannerService(
-        session,
-        MockPlanner(),
-        lane_capabilities={"coder": "Write game code."},
-    )
-    _case, step = planner_service.plan_pull_request(pr.id, {"studio-ystackai": "abc123"})
-    assert step.status == StepStatus.READY
-
-    service = ControlPlaneService(session)
-    service.issue_lease(step_id=step.id, worker_id="coder1", ttl_seconds=900)
-    assert step.status == StepStatus.LEASED
-
-    service.apply_completed_diff(
-        step_id=step.id,
-        worker_id="coder1",
-        touched_paths=["src/player.js"],
-        changed_hunks=["+ function move() {}"],
-    )
-    session.refresh(step)
-    assert step.status == StepStatus.SUCCEEDED
 
 
 def test_full_flow_intent_to_outcome_completion(session):
