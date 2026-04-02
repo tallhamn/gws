@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Optional
 
 import yaml
 from fastapi import Header, HTTPException, status
@@ -76,13 +77,13 @@ class WorkerRegistry:
             )
         return cls(workers_by_token)
 
-    def get_by_token(self, token: str) -> WorkerIdentity | None:
+    def get_by_token(self, token: str) -> Optional[WorkerIdentity]:
         return self._workers_by_token.get(token)
 
 
 def authenticate_worker(
     registry: WorkerRegistry,
-    authorization: str | None,
+    authorization: Optional[str],
 ) -> WorkerIdentity:
     if authorization is None:
         raise HTTPException(
@@ -108,7 +109,7 @@ def authenticate_worker(
 
 
 def build_worker_auth_dependency(registry: WorkerRegistry):
-    def require_worker(authorization: str | None = Header(default=None)) -> WorkerIdentity:
+    def require_worker(authorization: Optional[str] = Header(default=None)) -> WorkerIdentity:
         return authenticate_worker(registry, authorization)
 
     return require_worker

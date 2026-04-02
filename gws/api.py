@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, HTTPException, status
 from pydantic import BaseModel, Field
 
+from .auth import WorkerIdentity, WorkerRegistry, build_worker_auth_dependency
 from .config import Settings
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
@@ -12,9 +13,6 @@ from .models import PullRequest
 
 
 class PullRequestCreate(BaseModel):
-    worker_id: str
-    lane: str
-    repo_access_set: list[str] = Field(default_factory=list)
     envelope: dict = Field(default_factory=dict)
 
 
@@ -30,6 +28,8 @@ class CompletedDiffIn(BaseModel):
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
+    worker_registry = WorkerRegistry.from_file(settings.workers_path)
+    require_worker = build_worker_auth_dependency(worker_registry)
     session_factory, engine = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)
 
@@ -38,12 +38,15 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/pull-requests", status_code=status.HTTP_202_ACCEPTED)
-    def create_pull_request(payload: PullRequestCreate) -> dict[str, int]:
+    def create_pull_request(
+        payload: PullRequestCreate,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> dict[str, int]:
         with session_factory() as session:
             pull_request = PullRequest(
-                worker_id=payload.worker_id,
-                lane=payload.lane,
-                repo_access_set=payload.repo_access_set,
+                worker_id=worker.worker_id,
+                lane=worker.lane,
+                repo_access_set=list(worker.repo_access_set),
                 envelope=payload.envelope,
             )
 
