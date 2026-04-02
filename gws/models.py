@@ -1,5 +1,5 @@
 import enum
-from datetime import UTC, datetime
+from datetime import datetime, timezone
 from typing import Optional
 import weakref
 
@@ -255,7 +255,7 @@ class IntentVersion(Base):
     context: Mapped[str] = mapped_column(Text, default="")
     planner_guidance: Mapped[str] = mapped_column(Text, default="")
     accepted_amendments: Mapped[list[dict]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     cases: Mapped[list["Case"]] = relationship(back_populates="intent_version_ref")
 
 
@@ -269,7 +269,7 @@ class AmendmentProposal(Base):
     amended_brief_text: Mapped[str] = mapped_column(Text)
     is_breaking: Mapped[bool] = mapped_column(default=False)
     status: Mapped[str] = mapped_column(String(32), default="pending")
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
 
@@ -352,7 +352,7 @@ class Lease(Base):
     step_id: Mapped[int] = mapped_column(ForeignKey("steps.id"), index=True)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
-    issued_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    issued_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     heartbeat_deadline: Mapped[datetime] = mapped_column(DateTime, index=True)
     expires_at: Mapped[datetime] = mapped_column(DateTime, index=True)
     expired_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
@@ -382,7 +382,7 @@ class Attempt(Base):
     )
     artifact_refs: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     submitted_diff_ref: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     step: Mapped[Step] = relationship(back_populates="attempts")
     lease: Mapped[Lease] = relationship(back_populates="attempt")
     verdicts: Mapped[list["Verdict"]] = relationship(back_populates="attempt")
@@ -402,7 +402,7 @@ class Verdict(Base):
             create_constraint=True,
         )
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(UTC).replace(tzinfo=None))
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc).replace(tzinfo=None))
     attempt: Mapped[Attempt] = relationship(back_populates="verdicts")
 
 

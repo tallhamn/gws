@@ -7,9 +7,16 @@ from gws.db import Base, make_session_factory
 from gws.models import Case, IntentVersion, Step, StepStatus, Verdict
 
 
-def test_completed_diff_appends_security_review_step_via_api(tmp_path):
+def auth_headers(token: str) -> dict[str, str]:
+    return {"Authorization": f"Bearer {token}"}
+
+
+def test_completed_diff_appends_security_review_step_via_api(tmp_path, worker_registry_path):
     database_path = tmp_path / "end_to_end.db"
-    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
     session_factory, engine = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)
 
@@ -40,6 +47,7 @@ def test_completed_diff_appends_security_review_step_via_api(tmp_path):
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
         },
+        headers=auth_headers("token-coder-1"),
     )
 
     assert response.status_code == 200
@@ -51,6 +59,7 @@ def test_completed_diff_appends_security_review_step_via_api(tmp_path):
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
         },
+        headers=auth_headers("token-coder-1"),
     )
 
     assert retry_response.status_code == 200
@@ -66,9 +75,12 @@ def test_completed_diff_appends_security_review_step_via_api(tmp_path):
     assert len(verdicts) == 1
 
 
-def test_completed_diff_rejects_expired_lease_via_api(tmp_path):
+def test_completed_diff_rejects_expired_lease_via_api(tmp_path, worker_registry_path):
     database_path = tmp_path / "end_to_end_expired.db"
-    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
     session_factory, engine = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)
 
@@ -100,6 +112,7 @@ def test_completed_diff_rejects_expired_lease_via_api(tmp_path):
             "touched_paths": ["auth/session.py"],
             "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
         },
+        headers=auth_headers("token-coder-1"),
     )
 
     assert response.status_code == 400
@@ -116,11 +129,9 @@ def test_completed_diff_rejects_expired_lease_via_api(tmp_path):
 
 def test_full_flow_intent_to_step_completion(session):
     """Intent creation -> pull request -> plan -> lease -> execute -> submit -> verify."""
-    from gws.models import IntentVersion, PullRequest, Step, StepStatus
-    from gws.control_plane import ControlPlaneService
+    from gws.models import PullRequest
     from gws.planner import PlannerService
 
-    # 1. Create intent with context
     intent = IntentVersion(
         intent_id="game-1",
         intent_version=1,
@@ -131,7 +142,6 @@ def test_full_flow_intent_to_step_completion(session):
     session.add(intent)
     session.commit()
 
-    # 2. Worker creates pull request
     pr = PullRequest(
         worker_id="coder1",
         lane="coder",
@@ -141,7 +151,6 @@ def test_full_flow_intent_to_step_completion(session):
     session.add(pr)
     session.commit()
 
-    # 3. Plan (with mock planner that returns valid plan)
     class MockPlanner:
         def synthesize(self, *, brief, lane, repo_heads, envelope, **kwargs):
             assert "lane_capabilities" in kwargs or kwargs.get("lane_capabilities") is None
@@ -155,24 +164,121 @@ def test_full_flow_intent_to_step_completion(session):
             }
 
     planner_service = PlannerService(
-        session, MockPlanner(),
+        session,
+        MockPlanner(),
         lane_capabilities={"coder": "Write game code."},
     )
-    case, step = planner_service.plan_pull_request(
-        pr.id, {"studio-ystackai": "abc123"},
-    )
+    _case, step = planner_service.plan_pull_request(pr.id, {"studio-ystackai": "abc123"})
     assert step.status == StepStatus.READY
 
-    # 4. Issue lease
     service = ControlPlaneService(session)
-    lease = service.issue_lease(step_id=step.id, worker_id="coder1", ttl_seconds=900)
+    service.issue_lease(step_id=step.id, worker_id="coder1", ttl_seconds=900)
     assert step.status == StepStatus.LEASED
 
-    # 5. Submit completed diff
     service.apply_completed_diff(
         step_id=step.id,
+        worker_id="coder1",
         touched_paths=["src/player.js"],
         changed_hunks=["+ function move() {}"],
     )
     session.refresh(step)
     assert step.status == StepStatus.SUCCEEDED
+
+
+def test_completed_diff_rejects_non_owner_worker_via_api(tmp_path, worker_registry_path):
+    database_path = tmp_path / "end_to_end_forbidden.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief"))
+        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
+        step = Step(
+            case=case,
+            repo="repo-a",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.READY,
+            allowed_paths=["auth/**"],
+            forbidden_paths=[],
+        )
+        session.add_all([case, step])
+        session.commit()
+        ControlPlaneService(session).issue_lease(step.id, worker_id="coder-1", ttl_seconds=60)
+        step_id = step.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/steps/{step_id}/complete",
+        json={
+            "touched_paths": ["auth/session.py"],
+            "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
+        },
+        headers=auth_headers("token-security-1"),
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"detail": "step lease belongs to another worker"}
+
+    with session_factory() as session:
+        step = session.get(Step, step_id)
+        verdicts = session.query(Verdict).all()
+
+    assert step is not None
+    assert step.status == StepStatus.LEASED
+    assert verdicts == []
+
+
+def test_completed_diff_rejects_missing_authorization_via_api(tmp_path, worker_registry_path):
+    database_path = tmp_path / "end_to_end_missing_auth.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief"))
+        case = Case(intent_id="intent-1", intent_version=1, title="Case", goal="Goal")
+        step = Step(
+            case=case,
+            repo="repo-a",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.READY,
+            allowed_paths=["auth/**"],
+            forbidden_paths=[],
+        )
+        session.add_all([case, step])
+        session.commit()
+        ControlPlaneService(session).issue_lease(step.id, worker_id="coder-1", ttl_seconds=60)
+        step_id = step.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        f"/steps/{step_id}/complete",
+        json={
+            "touched_paths": ["auth/session.py"],
+            "changed_hunks": ["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Missing or invalid authorization header"}
+
+    with session_factory() as session:
+        step = session.get(Step, step_id)
+        verdicts = session.query(Verdict).all()
+
+    assert step is not None
+    assert step.status == StepStatus.LEASED
+    assert verdicts == []

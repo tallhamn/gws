@@ -3,12 +3,12 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request, status
+from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
-
 from sqlalchemy.exc import IntegrityError
 
+from .auth import WorkerIdentity, WorkerRegistry, build_worker_auth_dependency
 from .config import Settings
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
@@ -18,10 +18,7 @@ logger = logging.getLogger(__name__)
 
 
 class PullRequestCreate(BaseModel):
-    worker_id: str
-    lane: str
     intent_id: str
-    repo_access_set: list[str] = Field(default_factory=list)
     envelope: dict = Field(default_factory=dict)
 
 
@@ -33,7 +30,7 @@ class LeaseRequest(BaseModel):
     worker_id: str
     ttl_seconds: int = 60
     repo_heads: dict[str, str] = Field(default_factory=dict)
-    intent_id: str | None = None
+    intent_id: Optional[str] = None
 
 
 class HeartbeatRequest(BaseModel):
@@ -55,6 +52,8 @@ class IntentCreate(BaseModel):
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
+    worker_registry = WorkerRegistry.from_file(settings.workers_path)
+    require_worker = build_worker_auth_dependency(worker_registry)
     session_factory, engine = make_session_factory(
         settings.database_url,
         pool_size=settings.db_pool_size,
@@ -68,8 +67,17 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         @app.middleware("http")
         async def check_api_key(request: Request, call_next):
-            if request.url.path == "/healthz":
+            worker_auth_route = (
+                (request.method == "POST" and request.url.path == "/pull-requests")
+                or (
+                    request.method == "POST"
+                    and request.url.path.startswith("/steps/")
+                    and request.url.path.endswith("/complete")
+                )
+            )
+            if request.url.path == "/healthz" or worker_auth_route:
                 return await call_next(request)
+
             auth = request.headers.get("Authorization", "")
             if not auth.startswith("Bearer ") or auth[7:] != settings.api_key:
                 logger.warning("Unauthorized request to %s", request.url.path)
@@ -84,20 +92,29 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         return {"status": "ok"}
 
     @app.post("/pull-requests", status_code=status.HTTP_202_ACCEPTED)
-    def create_pull_request(payload: PullRequestCreate) -> dict[str, int]:
+    def create_pull_request(
+        payload: PullRequestCreate,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> dict[str, int]:
         with session_factory() as session:
             pull_request = PullRequest(
-                worker_id=payload.worker_id,
-                lane=payload.lane,
+                worker_id=worker.worker_id,
+                lane=worker.lane,
                 intent_id=payload.intent_id,
-                repo_access_set=payload.repo_access_set,
+                repo_access_set=list(worker.repo_access_set),
                 envelope=payload.envelope,
             )
 
             session.add(pull_request)
             session.commit()
             session.refresh(pull_request)
-            logger.info("Pull request %d created by worker %s for lane %s", pull_request.id, payload.worker_id, payload.lane)
+            logger.info(
+                "Pull request %d created by worker %s for lane %s (intent=%s)",
+                pull_request.id,
+                worker.worker_id,
+                worker.lane,
+                payload.intent_id,
+            )
 
             return {"pull_request_id": pull_request.id}
 
@@ -111,26 +128,35 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return PullRequestResponse(status=pull_request.status)
 
     @app.post("/steps/{step_id}/complete")
-    async def complete_step(step_id: int, payload: CompletedDiffIn) -> dict[str, str]:
+    async def complete_step(
+        step_id: int,
+        payload: CompletedDiffIn,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> dict[str, str]:
         with session_factory() as session:
             service = ControlPlaneService(session)
             try:
                 service.apply_completed_diff(
                     step_id=step_id,
+                    worker_id=worker.worker_id,
                     touched_paths=payload.touched_paths,
                     changed_hunks=payload.changed_hunks,
                 )
+            except PermissionError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
             except ValueError as exc:
                 logger.warning("Step %d completion failed: %s", step_id, str(exc))
                 if str(exc) == f"unknown step_id: {step_id}":
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
-            # Run artifact verification if the step passed scope checks and has requirements
+            # Run artifact verification if the step passed scope checks and has requirements.
             from .models import Step, StepStatus
+
             step = session.get(Step, step_id)
             if step and step.status == StepStatus.SUCCEEDED and step.artifact_requirements:
                 from .verifier import verify_artifacts
+
                 gateway_url = settings.gateway_url
                 if gateway_url:
                     artifact_result = await verify_artifacts(
@@ -152,7 +178,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_factory() as session:
             from .models import IntentVersion, Step, StepStatus
 
-            # 1. Check for existing READY steps in this lane
             step = (
                 session.query(Step)
                 .filter(Step.lane == lane, Step.status == StepStatus.READY)
@@ -160,7 +185,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 .first()
             )
 
-            # 2. If none, try JIT planning from the latest intent
             if step is None and payload.intent_id and payload.repo_heads:
                 intent = (
                     session.query(IntentVersion)
@@ -177,7 +201,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         planner_client = build_planner_client(settings)
                         policy = PolicyEngine.from_file("policy.yaml")
                         planner_service = PlannerService(
-                            session, planner_client,
+                            session,
+                            planner_client,
                             lane_capabilities=policy.lane_capabilities(),
                         )
                         pr = PullRequest(
@@ -240,6 +265,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def create_intent(payload: IntentCreate) -> dict:
         with session_factory() as session:
             from .models import IntentVersion
+
             latest_version = (
                 session.query(IntentVersion.intent_version)
                 .filter(IntentVersion.intent_id == payload.intent_id)
@@ -271,6 +297,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def get_intent(intent_id: str) -> dict:
         with session_factory() as session:
             from .models import IntentVersion
+
             intent = (
                 session.query(IntentVersion)
                 .filter(IntentVersion.intent_id == intent_id)

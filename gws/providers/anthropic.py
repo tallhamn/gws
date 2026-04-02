@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from collections.abc import Mapping
+from typing import Optional
 
 try:
     import anthropic
@@ -22,9 +23,9 @@ _BASE_SYSTEM_PROMPT = (
 
 def _build_system_prompt(
     *,
-    lane_capabilities: dict[str, str] | None = None,
-    intent_context: str | None = None,
-    planner_guidance: str | None = None,
+    lane_capabilities: Optional[dict[str, str]] = None,
+    intent_context: Optional[str] = None,
+    planner_guidance: Optional[str] = None,
 ) -> str:
     parts = [_BASE_SYSTEM_PROMPT]
     if lane_capabilities:
@@ -38,7 +39,7 @@ def _build_system_prompt(
 
 
 class AnthropicPlannerClient:
-    def __init__(self, api_key: str | None = None, model: str | None = None, timeout: float = 60.0):
+    def __init__(self, api_key: Optional[str] = None, model: Optional[str] = None, timeout: float = 60.0):
         if anthropic is None:
             raise RuntimeError("anthropic package is required to use AnthropicPlannerClient")
         self.client = anthropic.Anthropic(api_key=api_key)
@@ -72,9 +73,9 @@ class AnthropicPlannerClient:
         lane: str,
         repo_heads: dict[str, str],
         envelope: dict,
-        lane_capabilities: dict[str, str] | None = None,
-        intent_context: str | None = None,
-        planner_guidance: str | None = None,
+        lane_capabilities: Optional[dict[str, str]] = None,
+        intent_context: Optional[str] = None,
+        planner_guidance: Optional[str] = None,
     ) -> dict:
         system_prompt = _build_system_prompt(
             lane_capabilities=lane_capabilities,

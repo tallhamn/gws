@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
+from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -21,7 +22,13 @@ class PlannerService:
         "step_type",
     )
 
-    def __init__(self, session: Session, planner_client: PlannerClient, *, lane_capabilities: dict[str, str] | None = None):
+    def __init__(
+        self,
+        session: Session,
+        planner_client: PlannerClient,
+        *,
+        lane_capabilities: Optional[dict[str, str]] = None,
+    ):
         self.session = session
         self.planner_client = planner_client
         self.lane_capabilities = lane_capabilities

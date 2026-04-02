@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Protocol
+from typing import Optional, Protocol
 
 from .config import Settings
 
@@ -13,9 +13,9 @@ class PlannerClient(Protocol):
         lane: str,
         repo_heads: dict[str, str],
         envelope: dict,
-        lane_capabilities: dict[str, str] | None = None,
-        intent_context: str | None = None,
-        planner_guidance: str | None = None,
+        lane_capabilities: Optional[dict[str, str]] = None,
+        intent_context: Optional[str] = None,
+        planner_guidance: Optional[str] = None,
     ) -> dict:
         ...
 

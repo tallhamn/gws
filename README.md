@@ -29,6 +29,12 @@ Install a concrete planner backend only if you want to use one:
 .venv/bin/pip install -e ".[anthropic]"
 ```
 
+Worker identities for authenticated pull-request creation live in `workers.yaml`. Each entry maps a bearer token to a worker ID, lane, and repository access set.
+
+`POST /pull-requests` requires `Authorization: Bearer <token>` and derives the worker identity server-side. The request body needs `intent_id` plus the envelope payload.
+
+`POST /steps/{step_id}/complete` also requires `Authorization: Bearer <token>` and only accepts completion from the worker that owns the active lease.
+
 ## Repository Layout
 
 - `gws/` active control-plane runtime

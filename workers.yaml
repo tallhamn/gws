@@ -1,0 +1,9 @@
+workers:
+  - token: token-coder-1
+    worker_id: coder-1
+    lane: coder
+    repo_access_set: ["repo-a", "repo-b"]
+  - token: token-security-1
+    worker_id: security-1
+    lane: security-review
+    repo_access_set: ["repo-a"]

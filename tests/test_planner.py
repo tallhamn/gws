@@ -1,3 +1,5 @@
+from typing import Optional
+
 from gws.config import Settings
 from gws.gitops import changed_hunks
 from gws.models import Case, IntentVersion, PullRequest, Step, StepStatus
@@ -17,9 +19,9 @@ class FakePlannerClient:
         lane: str,
         repo_heads: dict[str, str],
         envelope: dict,
-        lane_capabilities: dict | None = None,
-        intent_context: str | None = None,
-        planner_guidance: str | None = None,
+        lane_capabilities: Optional[dict] = None,
+        intent_context: Optional[str] = None,
+        planner_guidance: Optional[str] = None,
     ) -> dict:
         self.calls.append(
             {

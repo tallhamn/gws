@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -16,13 +16,17 @@ class ControlPlaneService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply_completed_diff(self, *, step_id: int, touched_paths: list[str], changed_hunks: list[str]) -> None:
+    def apply_completed_diff(
+        self,
+        *,
+        step_id: int,
+        worker_id: str,
+        touched_paths: list[str],
+        changed_hunks: list[str],
+    ) -> None:
         step = self.session.get(Step, step_id)
         if step is None:
             raise ValueError(f"unknown step_id: {step_id}")
-        if step.status in {StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.REVOKED}:
-            logger.warning("Step %d already in terminal status %s, skipping", step_id, step.status.value)
-            return
 
         active_lease = (
             self.session.query(Lease)
@@ -31,9 +35,22 @@ class ControlPlaneService:
             .with_for_update()
             .first()
         )
-        if active_lease is None or active_lease.heartbeat_deadline <= datetime.now(UTC).replace(tzinfo=None):
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
+
+        if step.status in {StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.REVOKED}:
+            if active_lease is None or active_lease.heartbeat_deadline <= now:
+                logger.warning("Step %d already in terminal status %s, skipping", step_id, step.status.value)
+                return
+            if active_lease.worker_id != worker_id:
+                raise PermissionError("step lease belongs to another worker")
+            logger.warning("Step %d already in terminal status %s, skipping", step_id, step.status.value)
+            return
+
+        if active_lease is None or active_lease.heartbeat_deadline <= now:
             logger.warning("Step %d has no active lease for diff application", step_id)
             raise ValueError("step has no active lease")
+        if active_lease.worker_id != worker_id:
+            raise PermissionError("step lease belongs to another worker")
 
         attempt = active_lease.attempt
         if attempt is None:
@@ -102,7 +119,7 @@ class ControlPlaneService:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         step = self.session.get(Step, step_id)
         if step is None:
             raise ValueError(f"unknown step_id: {step_id}")
@@ -155,7 +172,7 @@ class ControlPlaneService:
         if ttl_seconds <= 0:
             raise ValueError("ttl_seconds must be positive")
 
-        now = datetime.now(UTC).replace(tzinfo=None)
+        now = datetime.now(timezone.utc).replace(tzinfo=None)
         lease = self.session.get(Lease, lease_id)
         if lease is None:
             raise ValueError(f"unknown lease_id: {lease_id}")
@@ -171,7 +188,7 @@ class ControlPlaneService:
         return lease
 
     def expire_leases(self, now_offset_seconds: int = 0) -> int:
-        now = datetime.now(UTC).replace(tzinfo=None) + timedelta(seconds=now_offset_seconds)
+        now = datetime.now(timezone.utc).replace(tzinfo=None) + timedelta(seconds=now_offset_seconds)
         leases = (
             self.session.query(Lease)
             .filter(Lease.expired_at.is_(None), Lease.heartbeat_deadline <= now)
