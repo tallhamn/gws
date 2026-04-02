@@ -1,9 +1,21 @@
 workers:
   - token: token-coder-1
-    worker_id: coder-1
+    worker_id: coder1
     lane: coder
-    repo_access_set: ["repo-a", "repo-b"]
-  - token: token-security-1
-    worker_id: security-1
-    lane: security-review
-    repo_access_set: ["repo-a"]
+    repo_access_set: ["studio-ystackai"]
+  - token: token-coder-2
+    worker_id: coder2
+    lane: coder
+    repo_access_set: ["studio-ystackai"]
+  - token: token-artist
+    worker_id: artist
+    lane: artist
+    repo_access_set: ["studio-ystackai"]
+  - token: token-musician
+    worker_id: musician
+    lane: musician
+    repo_access_set: ["studio-ystackai"]
+  - token: token-writer
+    worker_id: writer
+    lane: writer
+    repo_access_set: ["studio-ystackai"]
