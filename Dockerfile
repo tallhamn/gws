@@ -3,6 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml .
 COPY gws/ gws/
+COPY workers.yaml .
 COPY policy.yaml .
 
 RUN pip install --no-cache-dir ".[anthropic]" uvicorn
