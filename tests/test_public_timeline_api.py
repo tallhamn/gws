@@ -129,7 +129,13 @@ def test_public_timeline_returns_live_and_recent_events(tmp_path):
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     with session_factory() as session:
-        session.add(IntentVersion(intent_id="intent-vector-room", intent_version=1, brief_text="Build Vector Room"))
+        session.add(
+            IntentVersion(
+                intent_id="intent-vector-room",
+                intent_version=1,
+                brief_text="Build Vector Room\n\n- keep it compact",
+            )
+        )
         _seed_outcome(
             session,
             intent_id="intent-vector-room",
@@ -186,11 +192,175 @@ def test_public_timeline_returns_live_and_recent_events(tmp_path):
     data = response.json()
     assert data["intent"]["intent_id"] == "intent-vector-room"
     assert data["intent"]["intent_version"] == 1
+    assert data["timeline_events"][0]["brief_teaser"] == "Build Vector Room"
+    assert data["timeline_events"][0]["brief_text"] == "Build Vector Room\n\n- keep it compact"
     assert data["now_building"]["worker_id"] == "coder2"
     assert data["now_building"]["lease_status"] == "live"
     assert data["timeline_events"][0]["sequence_label"] == "1. Concept brief locked"
     assert data["timeline_events"][0]["title"] == "Concept brief locked"
     assert [event["outcome"] for event in data["timeline_events"][1:]] == ["succeeded", "failed", "live"]
+
+
+def test_public_timeline_brief_teaser_uses_first_readable_line(tmp_path):
+    database_path = tmp_path / "timeline-teaser.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-teaser",
+                intent_version=1,
+                brief_text="\n# Heading\n\n- bullet one\n  \nReadable teaser line\nAnother line",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-teaser/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["brief_summary"] == "Readable teaser line"
+    assert data["timeline_events"][0]["brief_text"] == "\n# Heading\n\n- bullet one\n  \nReadable teaser line\nAnother line"
+    assert data["timeline_events"][0]["brief_teaser"] == "Readable teaser line"
+
+
+def test_public_timeline_brief_teaser_skips_common_list_prefixes(tmp_path):
+    database_path = tmp_path / "timeline-list-prefixes.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-list-prefixes",
+                intent_version=1,
+                brief_text="\n* item one\n+ item two\n1. ordered item\nReadable teaser line",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-list-prefixes/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["timeline_events"][0]["brief_teaser"] == "Readable teaser line"
+
+
+def test_public_timeline_brief_teaser_preserves_numeric_and_literal_dash_lines(tmp_path):
+    database_path = tmp_path / "timeline-literal-lines.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-literal-lines",
+                intent_version=1,
+                brief_text="2026.04 launch polish\n-keep this literal\n- item one",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-literal-lines/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["brief_summary"] == "2026.04 launch polish"
+    assert data["timeline_events"][0]["brief_teaser"] == "2026.04 launch polish"
+
+
+def test_public_timeline_brief_teaser_falls_back_to_list_content(tmp_path):
+    database_path = tmp_path / "timeline-checklist-only.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-checklist-only",
+                intent_version=1,
+                brief_text="- [ ] outline scope\n* draft copy\n+ ship note\n1. final review",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-checklist-only/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["brief_summary"] == "outline scope"
+    assert data["timeline_events"][0]["brief_teaser"] == "outline scope"
+
+
+def test_public_timeline_brief_teaser_skips_multi_hash_headings(tmp_path):
+    database_path = tmp_path / "timeline-hash-prefixed.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-hash-prefixed",
+                intent_version=1,
+                brief_text="## Heading\n#launch-week polish\n#123 fix auth copy\nReadable teaser line",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-hash-prefixed/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["brief_summary"] == "#launch-week polish"
+    assert data["timeline_events"][0]["brief_teaser"] == "#launch-week polish"
+
+
+def test_public_timeline_brief_teaser_preserves_literal_dash_prefix(tmp_path):
+    database_path = tmp_path / "timeline-literal-dash.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(
+            IntentVersion(
+                intent_id="intent-literal-dash",
+                intent_version=1,
+                brief_text="-keep this literal\nReadable teaser line",
+            )
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-literal-dash/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["brief_summary"] == "-keep this literal"
+    assert data["timeline_events"][0]["brief_teaser"] == "-keep this literal"
 
 
 def test_public_timeline_returns_404_for_unknown_intent(tmp_path):

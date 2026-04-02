@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from datetime import datetime, timezone
 from typing import Any
 
@@ -25,6 +26,40 @@ def _as_utc_iso(value: datetime | None) -> str:
     if value is None:
         return ""
     return value.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _brief_teaser(brief_text: str) -> str:
+    heading_pattern = re.compile(r"^#{1,6}\s+")
+    list_item_pattern = re.compile(r"^(?:[-+*]|\d+[.)])\s+(.*\S.*)$")
+    checklist_pattern = re.compile(r"^\[(?: |x|X)\]\s*(.*\S.*)$")
+
+    def _list_item_content(readable_line: str) -> str | None:
+        list_item_match = list_item_pattern.match(readable_line)
+        if list_item_match is None:
+            return None
+        content = list_item_match.group(1).strip()
+        if not content:
+            return None
+        checklist_match = checklist_pattern.match(content)
+        if checklist_match is not None:
+            content = checklist_match.group(1).strip()
+        return content or None
+
+    fallback = ""
+    for line in brief_text.splitlines():
+        readable_line = line.strip()
+        if not readable_line:
+            continue
+        if heading_pattern.match(readable_line):
+            continue
+        list_item_content = _list_item_content(readable_line)
+        if list_item_content is not None:
+            if not fallback:
+                fallback = list_item_content
+            continue
+        return readable_line
+
+    return fallback
 
 
 def _active_work_item_and_lease(outcome: Outcome, now: datetime) -> tuple[WorkItem | None, Lease | None]:
@@ -175,6 +210,8 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             "sequence_label": "1. Concept brief locked",
             "title": "Concept brief locked",
             "what_was_built": "Drop brief accepted and pushed into GWS.",
+            "brief_teaser": _brief_teaser(intent.brief_text or ""),
+            "brief_text": intent.brief_text or "",
             "outcome": "succeeded",
             "worker_id": "",
             "occurred_at": _as_utc_iso(intent.created_at),
@@ -188,7 +225,7 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             "intent_id": intent.intent_id,
             "intent_version": intent.intent_version,
             "title": outcomes[0].title if outcomes else intent.intent_id,
-            "brief_summary": intent.brief_text.splitlines()[0] if intent.brief_text else "",
+            "brief_summary": _brief_teaser(intent.brief_text or ""),
         },
         "case_progress": {
             "total_cases": len(outcomes),
