@@ -88,3 +88,62 @@ def test_create_pull_request_ignores_client_supplied_status(tmp_path):
 
     assert fetch_response.status_code == 200
     assert fetch_response.json() == {"status": "pending"}
+
+
+def test_unauthenticated_request_returns_401_when_api_key_set(tmp_path):
+    database_path = tmp_path / "api.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/pull-requests",
+        json={
+            "worker_id": "worker-1",
+            "lane": "coder",
+            "intent_id": "intent-1",
+            "repo_access_set": ["repo-a"],
+            "envelope": {},
+        },
+    )
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
+
+
+def test_healthz_does_not_require_auth(tmp_path):
+    database_path = tmp_path / "api.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/healthz")
+
+    assert response.status_code == 200
+
+
+def test_authenticated_request_succeeds(tmp_path):
+    database_path = tmp_path / "api.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/pull-requests",
+        json={
+            "worker_id": "worker-1",
+            "lane": "coder",
+            "intent_id": "intent-1",
+            "repo_access_set": ["repo-a"],
+            "envelope": {},
+        },
+        headers={"Authorization": "Bearer secret-key"},
+    )
+
+    assert response.status_code == 202

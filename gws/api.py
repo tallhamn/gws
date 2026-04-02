@@ -2,7 +2,8 @@ from __future__ import annotations
 
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, status
+from fastapi import FastAPI, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
 from .config import Settings
@@ -33,6 +34,20 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     settings = settings or Settings()
     session_factory, engine = make_session_factory(settings.database_url)
     Base.metadata.create_all(engine)
+
+    if settings.api_key:
+
+        @app.middleware("http")
+        async def check_api_key(request: Request, call_next):
+            if request.url.path == "/healthz":
+                return await call_next(request)
+            auth = request.headers.get("Authorization", "")
+            if not auth.startswith("Bearer ") or auth[7:] != settings.api_key:
+                return JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "Invalid or missing API key"},
+                )
+            return await call_next(request)
 
     @app.get("/healthz")
     def healthz() -> dict[str, str]:
