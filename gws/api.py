@@ -75,7 +75,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     and request.url.path.endswith("/complete")
                 )
             )
-            if request.url.path == "/healthz" or worker_auth_route:
+            if request.url.path == "/healthz" or request.url.path.startswith("/public/") or worker_auth_route:
                 return await call_next(request)
 
             auth = request.headers.get("Authorization", "")
@@ -268,6 +268,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             service = ControlPlaneService(session)
             count = service.expire_leases()
             return {"expired_count": count}
+
+    @app.get("/public/intents/{intent_id}/timeline")
+    def get_public_timeline(intent_id: str) -> dict:
+        from .public_timeline import build_public_timeline
+
+        with session_factory() as session:
+            payload = build_public_timeline(session, intent_id)
+            if payload is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
+            return payload
 
     @app.post("/intents", status_code=status.HTTP_201_CREATED)
     def create_intent(payload: IntentCreate) -> dict:
