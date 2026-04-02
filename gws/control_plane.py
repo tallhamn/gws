@@ -24,6 +24,7 @@ class ControlPlaneService:
             self.session.query(Lease)
             .filter(Lease.step_id == step_id, Lease.expired_at.is_(None))
             .order_by(Lease.id.desc())
+            .with_for_update()
             .first()
         )
         if active_lease is None or active_lease.heartbeat_deadline <= datetime.utcnow():
@@ -101,6 +102,7 @@ class ControlPlaneService:
         active_lease = (
             self.session.query(Lease)
             .filter(Lease.step_id == step_id, Lease.expired_at.is_(None))
+            .with_for_update()
             .first()
         )
         if active_lease is not None:
