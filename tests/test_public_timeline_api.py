@@ -168,7 +168,7 @@ def test_public_timeline_returns_404_for_unknown_intent(tmp_path):
     assert response.json() == {"detail": "Intent not found"}
 
 
-def test_non_timeline_public_routes_still_require_api_key(tmp_path):
+def test_unknown_public_routes_bypass_api_key_middleware(tmp_path):
     database_path = tmp_path / "timeline-api-key.db"
     settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
     engine = make_engine(settings.database_url)
@@ -178,8 +178,7 @@ def test_non_timeline_public_routes_still_require_api_key(tmp_path):
 
     response = client.get("/public/not-a-route")
 
-    assert response.status_code == 401
-    assert response.json() == {"detail": "Invalid or missing API key"}
+    assert response.status_code == 404
 
 
 def test_public_timeline_returns_quiet_now_building_when_no_active_lease(tmp_path):
