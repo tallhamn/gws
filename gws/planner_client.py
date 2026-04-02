@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Optional, Protocol
 
 from .config import Settings
+from .contracts import SynthesizedPlan
 
 
 class PlannerClient(Protocol):
@@ -16,7 +17,7 @@ class PlannerClient(Protocol):
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> dict:
+    ) -> SynthesizedPlan:
         ...
 
 

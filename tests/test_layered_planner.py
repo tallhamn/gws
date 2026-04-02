@@ -66,4 +66,4 @@ def test_synthesize_works_without_optional_context():
         repo_heads={"repo-a": "abc"},
         envelope={},
     )
-    assert result["title"] == "Do thing"
+    assert result.title == "Do thing"

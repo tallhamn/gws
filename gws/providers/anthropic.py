@@ -6,6 +6,8 @@ import time
 from collections.abc import Mapping
 from typing import Optional
 
+from gws.contracts import SynthesizedPlan
+
 try:
     import anthropic
 except ImportError:
@@ -76,7 +78,7 @@ class AnthropicPlannerClient:
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> dict:
+    ) -> SynthesizedPlan:
         system_prompt = _build_system_prompt(
             lane_capabilities=lane_capabilities,
             intent_context=intent_context,
@@ -96,7 +98,7 @@ class AnthropicPlannerClient:
                     messages=[{"role": "user", "content": user_data}],
                     timeout=self.timeout,
                 )
-                return self._parse_response(message)
+                return SynthesizedPlan.model_validate(self._parse_response(message))
             except ValueError:
                 raise
             except Exception as exc:

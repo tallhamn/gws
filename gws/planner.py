@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
 from typing import Optional
 
+from pydantic import ValidationError
 from sqlalchemy.orm import Session
 
+from .contracts import SynthesizedPlan
 from .models import Case, IntentVersion, PullRequest, Step, StepStatus
 from .planner_client import PlannerClient
 
@@ -13,15 +14,6 @@ logger = logging.getLogger(__name__)
 
 
 class PlannerService:
-    REQUIRED_PLAN_KEYS = (
-        "title",
-        "goal",
-        "repo",
-        "allowed_paths",
-        "forbidden_paths",
-        "step_type",
-    )
-
     def __init__(
         self,
         session: Session,
@@ -59,58 +51,39 @@ class PlannerService:
             planner_guidance=active_intent.planner_guidance or None,
         )
         try:
-            plan = self._validate_plan(plan)
-        except ValueError as exc:
+            plan = plan if isinstance(plan, SynthesizedPlan) else SynthesizedPlan.model_validate(plan)
+        except ValidationError as exc:
             logger.warning("Plan validation failed: %s", str(exc))
-            raise
-        selected_repo = plan["repo"]
+            raise ValueError(f"synthesized plan invalid: {exc}") from exc
+        selected_repo = plan.repo
         if selected_repo not in repo_heads:
             raise ValueError(f"missing repo head for repo: {selected_repo}")
         if selected_repo not in pull.repo_access_set:
             raise ValueError(f"repo {selected_repo} is not in pull request access set")
 
-        logger.info("Plan: repo=%s, step_type=%s, title=%s", plan["repo"], plan["step_type"], plan["title"])
+        logger.info("Plan: repo=%s, step_type=%s, title=%s", plan.repo, plan.step_type, plan.title)
 
         case = Case(
             intent_id=active_intent.intent_id,
             intent_version=active_intent.intent_version,
-            title=plan["title"],
-            goal=plan["goal"],
+            title=plan.title,
+            goal=plan.goal,
         )
         step = Step(
             case=case,
             repo=selected_repo,
             lane=pull.lane,
-            step_type=plan["step_type"],
+            step_type=plan.step_type,
             status=StepStatus.READY,
-            allowed_paths=plan["allowed_paths"],
-            forbidden_paths=plan["forbidden_paths"],
+            allowed_paths=plan.allowed_paths,
+            forbidden_paths=plan.forbidden_paths,
             base_commit=repo_heads[selected_repo],
         )
 
         pull.repo_heads = dict(repo_heads)
-        pull.planning_result = dict(plan)
+        pull.planning_result = plan.model_dump()
         pull.status = "ready"
 
         self.session.add_all([case, step])
         self.session.commit()
         return case, step
-
-    def _validate_plan(self, plan: dict) -> dict:
-        if not isinstance(plan, Mapping):
-            raise ValueError("synthesized plan must be a mapping")
-        missing_keys = [key for key in self.REQUIRED_PLAN_KEYS if key not in plan]
-        if missing_keys:
-            raise ValueError(f"synthesized plan missing required keys: {', '.join(missing_keys)}")
-        normalized_plan = dict(plan)
-
-        for key in ("title", "goal", "repo", "step_type"):
-            if not isinstance(normalized_plan[key], str):
-                raise ValueError(f"synthesized plan {key} must be a string")
-
-        for key in ("allowed_paths", "forbidden_paths"):
-            value = normalized_plan[key]
-            if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-                raise ValueError(f"synthesized plan {key} must be a list of strings")
-
-        return normalized_plan

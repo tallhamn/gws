@@ -1,6 +1,9 @@
 from typing import Optional
 
+from pydantic import ValidationError
+
 from gws.config import Settings
+from gws.contracts import SynthesizedPlan
 from gws.gitops import changed_hunks
 from gws.models import Case, IntentVersion, PullRequest, Step, StepStatus
 from gws.planner_client import build_planner_client
@@ -34,6 +37,37 @@ class FakePlannerClient:
         if isinstance(self.plan, dict):
             return dict(self.plan)
         return self.plan
+
+
+def test_synthesized_plan_accepts_valid_payload():
+    plan = SynthesizedPlan.model_validate(
+        {
+            "title": "Build player movement",
+            "goal": "Implement movement controls",
+            "repo": "repo-a",
+            "allowed_paths": ["src/**"],
+            "forbidden_paths": [],
+            "step_type": "execute",
+        }
+    )
+
+    assert plan.repo == "repo-a"
+    assert plan.allowed_paths == ["src/**"]
+
+
+def test_synthesized_plan_rejects_missing_required_keys():
+    try:
+        SynthesizedPlan.model_validate(
+            {
+                "title": "Build player movement",
+                "repo": "repo-a",
+            }
+        )
+    except ValidationError as exc:
+        assert "goal" in str(exc)
+        assert "step_type" in str(exc)
+    else:
+        raise AssertionError("expected ValidationError")
 
 
 def test_settings_expose_generic_planner_fields():
@@ -100,7 +134,9 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
             captured["max_tokens"] = max_tokens
             captured["messages"] = messages
             captured["system"] = system
-            return FakeMessage('{"status": "ok"}')
+            return FakeMessage(
+                '{"title":"Build player movement","goal":"Implement movement controls","repo":"repo-a","allowed_paths":["src/**"],"forbidden_paths":[],"step_type":"execute"}'
+            )
 
     class FakeAnthropic:
         def __init__(self, api_key=None):
@@ -121,7 +157,14 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
     client = build_planner_client(settings)
     result = client.synthesize(brief="brief", lane="lane", repo_heads={"repo-a": "abc123"}, envelope={"max_runtime": 1})
 
-    assert result == {"status": "ok"}
+    assert result.model_dump() == {
+        "title": "Build player movement",
+        "goal": "Implement movement controls",
+        "repo": "repo-a",
+        "allowed_paths": ["src/**"],
+        "forbidden_paths": [],
+        "step_type": "execute",
+    }
     assert captured["api_key"] == "test-key"
     assert captured["model"] == "claude-sonnet-4-20250514"
     assert captured["max_tokens"] == 512
@@ -302,7 +345,8 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
     try:
         planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
     except ValueError as exc:
-        assert str(exc) == "synthesized plan missing required keys: step_type"
+        assert "synthesized plan invalid:" in str(exc)
+        assert "step_type" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 
@@ -327,7 +371,8 @@ def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
     try:
         planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
     except ValueError as exc:
-        assert str(exc) == "synthesized plan must be a mapping"
+        assert "synthesized plan invalid:" in str(exc)
+        assert "valid dictionary" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 
@@ -364,7 +409,8 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     try:
         planner.plan_pull_request(pull.id, repo_heads={"repo-a": "abc123"})
     except ValueError as exc:
-        assert str(exc) == "synthesized plan allowed_paths must be a list of strings"
+        assert "synthesized plan invalid:" in str(exc)
+        assert "allowed_paths" in str(exc)
     else:
         raise AssertionError("expected ValueError")
 

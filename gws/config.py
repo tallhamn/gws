@@ -13,6 +13,7 @@ class Settings(BaseSettings):
     db_pool_pre_ping: bool = True
     api_key: Optional[str] = None
     workers_path: str = "workers.yaml"
+    policy_path: str = "policy.yaml"
     planner_provider: Optional[str] = None
     planner_model: Optional[str] = None
     planner_api_key: Optional[str] = None
