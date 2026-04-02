@@ -141,7 +141,19 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 lease = service.issue_lease(step_id=step.id, worker_id=payload.worker_id, ttl_seconds=payload.ttl_seconds)
             except ValueError as exc:
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-            return {"lease_id": lease.id, "step_id": step.id}
+            return {
+                "lease_id": lease.id,
+                "step_id": step.id,
+                "title": step.case.title,
+                "goal": step.case.goal,
+                "repo": step.repo,
+                "lane": step.lane,
+                "step_type": step.step_type,
+                "allowed_paths": list(step.allowed_paths),
+                "forbidden_paths": list(step.forbidden_paths),
+                "base_commit": step.base_commit,
+                "artifact_requirements": list(step.artifact_requirements),
+            }
 
     @app.post("/leases/{lease_id}/heartbeat")
     def heartbeat_lease(lease_id: int, payload: HeartbeatRequest) -> dict:
