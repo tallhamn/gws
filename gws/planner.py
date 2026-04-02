@@ -118,7 +118,7 @@ class PlannerService:
             sequence_index=sequence_index,
             repo=selected_repo,
             lane=planning_session.lane,
-            work_type=plan.step_type,
+            work_type=plan.work_type,
             status=WorkItemStatus.READY,
             allowed_paths=plan.allowed_paths,
             forbidden_paths=plan.forbidden_paths,

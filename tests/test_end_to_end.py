@@ -158,7 +158,7 @@ def test_full_flow_intent_to_outcome_completion(session):
                 "repo": "studio-ystackai",
                 "allowed_paths": ["src/**"],
                 "forbidden_paths": [],
-                "step_type": "execute",
+                "work_type": "execute",
             }
 
     coordinator = PlanningCoordinator(

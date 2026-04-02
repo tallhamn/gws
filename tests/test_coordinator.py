@@ -60,7 +60,7 @@ def test_coordinator_creates_outcome_planning_session_and_work_item(session):
             "repo": "repo-a",
             "allowed_paths": ["services/**"],
             "forbidden_paths": ["infra/**"],
-            "step_type": "execute",
+            "work_type": "execute",
         }
     )
     coordinator = PlanningCoordinator(
@@ -124,7 +124,7 @@ def test_coordinator_commits_success_state_and_event_together(session, monkeypat
             "repo": "repo-a",
             "allowed_paths": ["services/**"],
             "forbidden_paths": [],
-            "step_type": "execute",
+            "work_type": "execute",
         }
     )
     coordinator = PlanningCoordinator(
@@ -165,7 +165,7 @@ def test_coordinator_records_failed_planning_session_and_event(session):
             "repo": "repo-b",
             "allowed_paths": ["services/**"],
             "forbidden_paths": [],
-            "step_type": "execute",
+            "work_type": "execute",
         }
     )
     coordinator = PlanningCoordinator(
@@ -209,7 +209,7 @@ def test_coordinator_rolls_back_failed_materialization_before_recording_failure(
             "repo": "repo-a",
             "allowed_paths": ["services/**"],
             "forbidden_paths": [],
-            "step_type": "execute",
+            "work_type": "execute",
         }
     )
     coordinator = PlanningCoordinator(

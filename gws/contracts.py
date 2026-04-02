@@ -9,7 +9,7 @@ class SynthesizedPlan(BaseModel):
     repo: str
     allowed_paths: list[str] = Field(default_factory=list)
     forbidden_paths: list[str] = Field(default_factory=list)
-    step_type: str
+    work_type: str
 
 
 class WorkerLeaseRequest(BaseModel):
