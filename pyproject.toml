@@ -3,6 +3,7 @@ name = "gws"
 version = "0.1.0"
 requires-python = ">=3.11"
 dependencies = [
+  "alembic",
   "fastapi",
   "pydantic>=2",
   "pydantic-settings",
@@ -13,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic"]
-dev = ["httpx", "pytest"]
+dev = ["httpx", "pytest", "pytest-asyncio"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -4,11 +4,11 @@ import subprocess
 
 
 def snapshot_repo_head(path: str) -> str:
-    return subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True).strip()
+    return subprocess.check_output(["git", "-C", path, "rev-parse", "HEAD"], text=True, timeout=30).strip()
 
 
 def changed_hunks(base: str, head: str, repo_path: str) -> list[str]:
-    text = subprocess.check_output(["git", "-C", repo_path, "diff", "--unified=0", base, head], text=True)
+    text = subprocess.check_output(["git", "-C", repo_path, "diff", "--unified=0", base, head], text=True, timeout=30)
     lines: list[str] = []
     in_hunk = False
     for line in text.splitlines():

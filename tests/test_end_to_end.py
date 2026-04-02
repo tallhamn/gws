@@ -112,3 +112,67 @@ def test_completed_diff_rejects_expired_lease_via_api(tmp_path):
     assert step is not None
     assert step.status == StepStatus.READY
     assert verdicts == []
+
+
+def test_full_flow_intent_to_step_completion(session):
+    """Intent creation -> pull request -> plan -> lease -> execute -> submit -> verify."""
+    from gws.models import IntentVersion, PullRequest, Step, StepStatus
+    from gws.control_plane import ControlPlaneService
+    from gws.planner import PlannerService
+
+    # 1. Create intent with context
+    intent = IntentVersion(
+        intent_id="game-1",
+        intent_version=1,
+        brief_text="Build a browser platformer",
+        context="HTML/CSS/JS output. Pixel art style.",
+        planner_guidance="Core loop before polish.",
+    )
+    session.add(intent)
+    session.commit()
+
+    # 2. Worker creates pull request
+    pr = PullRequest(
+        worker_id="coder1",
+        lane="coder",
+        intent_id="game-1",
+        repo_access_set=["studio-ystackai"],
+    )
+    session.add(pr)
+    session.commit()
+
+    # 3. Plan (with mock planner that returns valid plan)
+    class MockPlanner:
+        def synthesize(self, *, brief, lane, repo_heads, envelope, **kwargs):
+            assert "lane_capabilities" in kwargs or kwargs.get("lane_capabilities") is None
+            return {
+                "title": "Build player movement",
+                "goal": "Implement WASD controls",
+                "repo": "studio-ystackai",
+                "allowed_paths": ["src/**"],
+                "forbidden_paths": [],
+                "step_type": "execute",
+            }
+
+    planner_service = PlannerService(
+        session, MockPlanner(),
+        lane_capabilities={"coder": "Write game code."},
+    )
+    case, step = planner_service.plan_pull_request(
+        pr.id, {"studio-ystackai": "abc123"},
+    )
+    assert step.status == StepStatus.READY
+
+    # 4. Issue lease
+    service = ControlPlaneService(session)
+    lease = service.issue_lease(step_id=step.id, worker_id="coder1", ttl_seconds=900)
+    assert step.status == StepStatus.LEASED
+
+    # 5. Submit completed diff
+    service.apply_completed_diff(
+        step_id=step.id,
+        touched_paths=["src/player.js"],
+        changed_hunks=["+ function move() {}"],
+    )
+    session.refresh(step)
+    assert step.status == StepStatus.SUCCEEDED

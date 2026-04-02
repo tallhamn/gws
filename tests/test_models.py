@@ -11,7 +11,7 @@ from gws.models import Case, IntentVersion, PullRequest, Step, StepStatus
 
 def test_can_persist_intent_case_and_step(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"])
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"])
     case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
     step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
 
@@ -45,7 +45,7 @@ def test_case_references_existing_intent_version(session):
 
 def test_json_payload_mutations_persist_after_commit(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music", accepted_amendments=[{"path": "a"}])
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"], envelope={"mode": "strict"})
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"mode": "strict"})
     case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
     step = Step(
         case=case,
@@ -84,7 +84,7 @@ def test_json_payload_mutations_persist_after_commit(session):
 
 def test_fresh_instances_support_json_defaults_before_flush(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    pull = PullRequest(worker_id="coder-1", lane="coder")
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1")
     case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
     step = Step(case=case, repo="repo-a", lane="coder", step_type="execute", status=StepStatus.READY)
 
@@ -121,6 +121,7 @@ def test_nested_json_payload_mutations_persist_after_commit(session):
     pull = PullRequest(
         worker_id="coder-1",
         lane="coder",
+        intent_id="intent-1",
         repo_access_set=["repo-a"],
         envelope={"limits": {"max_runtime": 10}},
     )
@@ -193,7 +194,7 @@ def test_replaced_nested_list_items_stop_dirtying_old_parent(session):
 
 
 def test_removed_nested_dict_entries_stop_dirtying_old_parent(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder", repo_access_set=["repo-a"], envelope={"limits": {"max_runtime": 10}})
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1", repo_access_set=["repo-a"], envelope={"limits": {"max_runtime": 10}})
     session.add(pull)
     session.commit()
 
@@ -245,10 +246,34 @@ def test_deleted_list_item_stops_dirtying_old_parent(session):
 
 
 def test_popitem_on_empty_dict_raises_key_error(session):
-    pull = PullRequest(worker_id="coder-1", lane="coder")
+    pull = PullRequest(worker_id="coder-1", lane="coder", intent_id="intent-1")
 
     with pytest.raises(KeyError):
         pull.envelope.popitem()
+
+
+def test_intent_version_has_context_and_planner_guidance(session):
+    iv = IntentVersion(
+        intent_id="i-1",
+        intent_version=1,
+        brief_text="Build a platformer",
+        context="Browser game. HTML/CSS/JS output.",
+        planner_guidance="Prioritize core loop before polish.",
+    )
+    session.add(iv)
+    session.commit()
+    session.refresh(iv)
+    assert iv.context == "Browser game. HTML/CSS/JS output."
+    assert iv.planner_guidance == "Prioritize core loop before polish."
+
+
+def test_intent_version_context_defaults_empty(session):
+    iv = IntentVersion(intent_id="i-2", intent_version=1, brief_text="Build something")
+    session.add(iv)
+    session.commit()
+    session.refresh(iv)
+    assert iv.context == ""
+    assert iv.planner_guidance == ""
 
 
 def test_make_engine_uses_static_pool_for_in_memory_sqlite():

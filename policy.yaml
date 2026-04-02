@@ -1,6 +1,16 @@
 lanes:
   coder:
     lease_ttl_seconds: 900
+    capabilities: "Write and modify game code (HTML, CSS, JavaScript). Create, edit, delete source files. Fix bugs, implement features."
+  artist:
+    lease_ttl_seconds: 900
+    capabilities: "Create and modify visual assets (sprites, backgrounds, UI elements). Work with image files."
+  musician:
+    lease_ttl_seconds: 900
+    capabilities: "Compose and produce audio (background music, sound effects). Work with audio files."
+  writer:
+    lease_ttl_seconds: 900
+    capabilities: "Write game copy, dialogue, descriptions, flavor text. Work with text content files."
   security-review:
     lease_ttl_seconds: 1800
   ci:
