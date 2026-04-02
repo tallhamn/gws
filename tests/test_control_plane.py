@@ -211,6 +211,7 @@ def test_apply_completed_diff_deduplicates_existing_review_step(session):
 
     service.apply_completed_diff(
         step_id=execute_step.id,
+        worker_id="worker-1",
         touched_paths=["auth/session.py"],
         changed_hunks=["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
     )
@@ -222,3 +223,36 @@ def test_apply_completed_diff_deduplicates_existing_review_step(session):
     assert [step.step_type for step in steps] == ["execute", "review"]
     assert [step.status for step in steps] == [StepStatus.SUCCEEDED, StepStatus.READY]
     assert len(verdicts) == 1
+
+
+def test_apply_completed_diff_rejects_non_owner_worker_without_mutating_lease_or_verdict(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    case = Case(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
+    step = Step(
+        case=case,
+        repo="repo-a",
+        lane="coder",
+        step_type="execute",
+        status=StepStatus.READY,
+        allowed_paths=["auth/**"],
+        forbidden_paths=[],
+    )
+    session.add_all([intent, case, step])
+    session.commit()
+
+    service = ControlPlaneService(session)
+    service.issue_lease(step_id=step.id, worker_id="worker-1", ttl_seconds=60)
+
+    with pytest.raises(PermissionError, match="step lease belongs to another worker"):
+        service.apply_completed_diff(
+            step_id=step.id,
+            worker_id="worker-2",
+            touched_paths=["auth/session.py"],
+            changed_hunks=["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
+        )
+
+    session.refresh(step)
+    verdicts = session.query(Verdict).all()
+
+    assert step.status is StepStatus.LEASED
+    assert verdicts == []

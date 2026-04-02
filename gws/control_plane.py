@@ -13,7 +13,14 @@ class ControlPlaneService:
     def __init__(self, session: Session):
         self.session = session
 
-    def apply_completed_diff(self, *, step_id: int, touched_paths: list[str], changed_hunks: list[str]) -> None:
+    def apply_completed_diff(
+        self,
+        *,
+        step_id: int,
+        worker_id: str,
+        touched_paths: list[str],
+        changed_hunks: list[str],
+    ) -> None:
         step = self.session.get(Step, step_id)
         if step is None:
             raise ValueError(f"unknown step_id: {step_id}")
@@ -28,6 +35,8 @@ class ControlPlaneService:
         )
         if active_lease is None or active_lease.heartbeat_deadline <= datetime.utcnow():
             raise ValueError("step has no active lease")
+        if active_lease.worker_id != worker_id:
+            raise PermissionError("step lease belongs to another worker")
 
         attempt = active_lease.attempt
         if attempt is None:

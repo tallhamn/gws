@@ -66,15 +66,22 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return PullRequestResponse(status=pull_request.status)
 
     @app.post("/steps/{step_id}/complete")
-    def complete_step(step_id: int, payload: CompletedDiffIn) -> dict[str, str]:
+    def complete_step(
+        step_id: int,
+        payload: CompletedDiffIn,
+        worker: WorkerIdentity = Depends(require_worker),
+    ) -> dict[str, str]:
         with session_factory() as session:
             service = ControlPlaneService(session)
             try:
                 service.apply_completed_diff(
                     step_id=step_id,
+                    worker_id=worker.worker_id,
                     touched_paths=payload.touched_paths,
                     changed_hunks=payload.changed_hunks,
                 )
+            except PermissionError as exc:
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(exc)) from exc
             except ValueError as exc:
                 if str(exc) == f"unknown step_id: {step_id}":
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from exc
