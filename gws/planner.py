@@ -5,6 +5,7 @@ import logging
 from typing import Optional
 
 from pydantic import ValidationError
+from sqlalchemy import update
 from sqlalchemy.orm import Session
 
 from .contracts import SynthesizedPlan
@@ -116,41 +117,63 @@ class PlannerService:
         return case, step
 
     def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem]:
-        planning_session = self.session.get(PlanningSession, planning_session_id)
-        if planning_session is None:
-            raise ValueError(f"unknown planning_session_id: {planning_session_id}")
-        if planning_session.status is not PlanningSessionStatus.PENDING:
+        claim_result = self.session.execute(
+            update(PlanningSession)
+            .where(
+                PlanningSession.id == planning_session_id,
+                PlanningSession.status == PlanningSessionStatus.PENDING,
+            )
+            .values(status=PlanningSessionStatus.MATERIALIZING)
+        )
+        if claim_result.rowcount != 1:
+            planning_session = self.session.get(PlanningSession, planning_session_id)
+            if planning_session is None:
+                raise ValueError(f"unknown planning_session_id: {planning_session_id}")
             raise ValueError(
-                "planning session already finalized: "
+                "planning session already claimed: "
                 f"{planning_session_id} is {planning_session.status.value}"
             )
 
-        context = planning_session.planning_context or {}
-        plan = self._validate_plan(
-            self.planner_client.synthesize(
-                brief=str(context.get("brief", "")),
-                lane=planning_session.lane,
-                repo_heads=dict(planning_session.repo_heads),
-                envelope=dict(context.get("envelope", {})),
-                lane_capabilities=self.lane_capabilities,
-                intent_context=context.get("intent_context") or None,
-                planner_guidance=context.get("planner_guidance") or None,
-            )
-        )
+        planning_session = self.session.get(PlanningSession, planning_session_id)
+        if planning_session is None:
+            raise ValueError(f"unknown planning_session_id: {planning_session_id}")
 
-        planning_session.plan_payload = plan.model_dump()
+        try:
+            context = planning_session.planning_context or {}
+            plan = self._validate_plan(
+                self.planner_client.synthesize(
+                    brief=str(context.get("brief", "")),
+                    lane=planning_session.lane,
+                    repo_heads=dict(planning_session.repo_heads),
+                    envelope=dict(context.get("envelope", {})),
+                    lane_capabilities=self.lane_capabilities,
+                    intent_context=context.get("intent_context") or None,
+                    planner_guidance=context.get("planner_guidance") or None,
+                )
+            )
 
-        selected_repo = plan.repo
-        if selected_repo not in planning_session.repo_heads:
-            raise MaterializePlanError(
-                f"missing repo head for repo: {selected_repo}",
-                plan_payload=planning_session.plan_payload,
-            )
-        if selected_repo not in planning_session.available_repos:
-            raise MaterializePlanError(
-                f"repo {selected_repo} is not in planning session available repos",
-                plan_payload=planning_session.plan_payload,
-            )
+            planning_session.plan_payload = plan.model_dump()
+
+            selected_repo = plan.repo
+            if selected_repo not in planning_session.repo_heads:
+                raise MaterializePlanError(
+                    f"missing repo head for repo: {selected_repo}",
+                    plan_payload=planning_session.plan_payload,
+                )
+            if selected_repo not in planning_session.available_repos:
+                raise MaterializePlanError(
+                    f"repo {selected_repo} is not in planning session available repos",
+                    plan_payload=planning_session.plan_payload,
+                )
+        except Exception as exc:
+            if self.session.is_active:
+                planning_session.status = PlanningSessionStatus.FAILED
+                if isinstance(exc, MaterializePlanError) and exc.plan_payload:
+                    planning_session.plan_payload = dict(exc.plan_payload)
+                planning_session.error_detail = str(exc)
+                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                self.session.flush()
+            raise
 
         outcome = planning_session.outcome
         outcome.title = plan.title

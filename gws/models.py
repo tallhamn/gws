@@ -66,6 +66,7 @@ class OutcomeResult(str, enum.Enum):
 
 class PlanningSessionStatus(str, enum.Enum):
     PENDING = "pending"
+    MATERIALIZING = "materializing"
     SUCCEEDED = "succeeded"
     FAILED = "failed"
 

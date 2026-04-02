@@ -109,15 +109,12 @@ class PlanningCoordinator:
             )
             self.session.commit()
         except Exception as exc:
-            failure_plan_payload = dict(getattr(exc, "plan_payload", {}) or {})
-            self.session.rollback()
             planning_session = self.session.get(PlanningSession, planning_session_id)
-            if planning_session is not None:
-                planning_session.status = PlanningSessionStatus.FAILED
-                if failure_plan_payload:
-                    planning_session.plan_payload = failure_plan_payload
-                planning_session.error_detail = str(exc)
-                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+            if (
+                self.session.is_active
+                and planning_session is not None
+                and planning_session.status is PlanningSessionStatus.FAILED
+            ):
                 self.session.add(
                     OutcomeEvent(
                         outcome=planning_session.outcome,
@@ -129,5 +126,26 @@ class PlanningCoordinator:
                     )
                 )
                 self.session.commit()
+            else:
+                failure_plan_payload = dict(getattr(exc, "plan_payload", {}) or {})
+                self.session.rollback()
+                planning_session = self.session.get(PlanningSession, planning_session_id)
+                if planning_session is not None:
+                    planning_session.status = PlanningSessionStatus.FAILED
+                    if failure_plan_payload:
+                        planning_session.plan_payload = failure_plan_payload
+                    planning_session.error_detail = str(exc)
+                    planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    self.session.add(
+                        OutcomeEvent(
+                            outcome=planning_session.outcome,
+                            event_type="planning_failed",
+                            payload={
+                                "planning_session_id": planning_session_id,
+                                "error": str(exc),
+                            },
+                        )
+                    )
+                    self.session.commit()
             raise
         return outcome, work_item

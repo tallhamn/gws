@@ -350,11 +350,39 @@ def test_planner_materialize_plan_is_single_shot(session):
     try:
         planner.materialize_plan(planning.id)
     except ValueError as exc:
-        assert str(exc) == "planning session already finalized: 1 is succeeded"
+        assert str(exc) == "planning session already claimed: 1 is succeeded"
     else:
         raise AssertionError("expected ValueError")
 
     assert session.query(WorkItem).count() == 1
+
+
+def test_planner_rejects_non_pending_planning_session_without_synthesizing(session):
+    planning = _planning_session(session)
+    planning.status = PlanningSessionStatus.MATERIALIZING
+    session.commit()
+
+    planner_client = FakePlannerClient(
+        {
+            "title": "Create /music endpoint",
+            "goal": "Implement /music experience",
+            "repo": "repo-a",
+            "allowed_paths": ["services/**"],
+            "forbidden_paths": ["infra/**"],
+            "step_type": "execute",
+        }
+    )
+    planner = PlannerService(session, planner_client=planner_client)
+
+    try:
+        planner.materialize_plan(planning.id)
+    except ValueError as exc:
+        assert str(exc) == "planning session already claimed: 1 is materializing"
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert planner_client.calls == []
+    assert session.query(WorkItem).count() == 0
 
 
 def test_planner_errors_for_unknown_planning_session_id(session):
@@ -408,8 +436,8 @@ def test_planner_rejects_selected_repo_outside_planning_session_repos(session):
     stored_outcome = session.get(Outcome, planning.outcome_id)
 
     assert session.query(WorkItem).count() == 0
-    assert stored_planning.status is PlanningSessionStatus.PENDING
-    assert stored_planning.plan_payload == {}
+    assert stored_planning.status is PlanningSessionStatus.FAILED
+    assert stored_planning.plan_payload == planner.planner_client.plan
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None
 
@@ -442,7 +470,7 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
     stored_outcome = session.get(Outcome, planning.outcome_id)
 
     assert session.query(WorkItem).count() == 0
-    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None
@@ -465,7 +493,7 @@ def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
     stored_outcome = session.get(Outcome, planning.outcome_id)
 
     assert session.query(WorkItem).count() == 0
-    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None
@@ -500,7 +528,7 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     stored_outcome = session.get(Outcome, planning.outcome_id)
 
     assert session.query(WorkItem).count() == 0
-    assert stored_planning.status is PlanningSessionStatus.PENDING
+    assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None
