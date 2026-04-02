@@ -41,6 +41,13 @@ class CompletedDiffIn(BaseModel):
     changed_hunks: list[str]
 
 
+class IntentCreate(BaseModel):
+    intent_id: str
+    brief_text: str
+    context: str = ""
+    planner_guidance: str = ""
+
+
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
@@ -154,5 +161,49 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             service = ControlPlaneService(session)
             count = service.expire_leases()
             return {"expired_count": count}
+
+    @app.post("/intents", status_code=status.HTTP_201_CREATED)
+    def create_intent(payload: IntentCreate) -> dict:
+        with session_factory() as session:
+            from .models import IntentVersion
+            latest_version = (
+                session.query(IntentVersion.intent_version)
+                .filter(IntentVersion.intent_id == payload.intent_id)
+                .order_by(IntentVersion.intent_version.desc())
+                .limit(1)
+                .scalar()
+            )
+            new_version = (latest_version or 0) + 1
+            intent = IntentVersion(
+                intent_id=payload.intent_id,
+                intent_version=new_version,
+                brief_text=payload.brief_text,
+                context=payload.context,
+                planner_guidance=payload.planner_guidance,
+            )
+            session.add(intent)
+            session.commit()
+            logger.info("Intent %s v%d created", payload.intent_id, new_version)
+            return {"intent_id": payload.intent_id, "intent_version": new_version}
+
+    @app.get("/intents/{intent_id}")
+    def get_intent(intent_id: str) -> dict:
+        with session_factory() as session:
+            from .models import IntentVersion
+            intent = (
+                session.query(IntentVersion)
+                .filter(IntentVersion.intent_id == intent_id)
+                .order_by(IntentVersion.intent_version.desc())
+                .first()
+            )
+            if intent is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
+            return {
+                "intent_id": intent.intent_id,
+                "intent_version": intent.intent_version,
+                "brief_text": intent.brief_text,
+                "context": intent.context,
+                "planner_guidance": intent.planner_guidance,
+            }
 
     return app
