@@ -7,14 +7,13 @@ from sqlalchemy.orm import Session, selectinload
 
 from .models import (
     Attempt,
-    AttemptResultStatus,
-    Case,
     IntentVersion,
     Lease,
-    Step,
-    StepStatus,
-    Verdict,
-    VerdictResult,
+    Outcome,
+    OutcomeEvent,
+    OutcomePhase,
+    OutcomeResult,
+    WorkItem,
 )
 
 
@@ -28,52 +27,42 @@ def _as_utc_iso(value: datetime | None) -> str:
     return value.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _sort_timestamp(*values: datetime | None) -> str:
-    candidates = [value for value in values if value is not None]
-    if not candidates:
-        return ""
-    return _as_utc_iso(max(candidates))
+def _active_work_item_and_lease(outcome: Outcome, now: datetime) -> tuple[WorkItem | None, Lease | None]:
+    active_candidates: list[tuple[datetime, WorkItem, Lease]] = []
+    for work_item in outcome.work_items:
+        for lease in sorted(work_item.leases, key=lambda item: item.id, reverse=True):
+            if lease.expired_at is None and lease.heartbeat_deadline > now:
+                active_candidates.append((lease.issued_at, work_item, lease))
+                break
+    if not active_candidates:
+        return None, None
+    _, work_item, lease = max(active_candidates, key=lambda item: item[0])
+    return work_item, lease
 
 
-def _active_lease(step: Step, now: datetime) -> Lease | None:
-    for lease in sorted(step.leases, key=lambda item: item.id, reverse=True):
-        if lease.expired_at is None and lease.heartbeat_deadline > now:
-            return lease
-    return None
+def _latest_attempt(outcome: Outcome) -> Attempt | None:
+    attempts = [attempt for work_item in outcome.work_items for attempt in work_item.attempts]
+    return max(attempts, key=lambda item: item.created_at, default=None)
 
 
-def _latest_attempt(step: Step) -> Attempt | None:
-    return max(step.attempts, key=lambda item: item.id, default=None)
+def _latest_event(outcome: Outcome, *event_types: str) -> OutcomeEvent | None:
+    matching_events = [event for event in outcome.events if event.event_type in event_types]
+    return max(matching_events, key=lambda item: item.created_at, default=None)
 
 
-def _latest_verdict(step: Step) -> Verdict | None:
-    verdicts = [verdict for attempt in step.attempts for verdict in attempt.verdicts]
-    return max(verdicts, key=lambda item: item.id, default=None)
-
-
-def _outcome_for_step(
-    step: Step,
-    active_lease: Lease | None,
-    latest_attempt: Attempt | None,
-    latest_verdict: Verdict | None,
-) -> str | None:
-    if active_lease is not None:
-        return "live"
-    if latest_verdict is not None and latest_verdict.result == VerdictResult.PASS:
-        return "succeeded"
+def _event_worker_id(outcome: Outcome) -> str:
+    latest_attempt = _latest_attempt(outcome)
     if latest_attempt is not None:
-        if latest_attempt.result_status is AttemptResultStatus.ACCEPTED:
-            return "succeeded"
-        if latest_attempt.result_status in {
-            AttemptResultStatus.PENDING,
-            AttemptResultStatus.SUBMITTED,
-            AttemptResultStatus.REJECTED,
-        }:
-            return "failed"
-    if step.status is StepStatus.SUCCEEDED:
+        return latest_attempt.worker_id
+    planning_started = _latest_event(outcome, "planning_started")
+    if planning_started is not None:
+        return str(planning_started.payload.get("worker_id", ""))
+    return ""
+
+
+def _completed_outcome_label(result: OutcomeResult | None) -> str:
+    if result is OutcomeResult.SUCCEEDED:
         return "succeeded"
-    if step.status in {StepStatus.READY, StepStatus.PLANNING, StepStatus.VERIFYING}:
-        return None
     return "failed"
 
 
@@ -87,28 +76,20 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
     if intent is None:
         return None
 
-    cases = (
-        session.query(Case)
+    outcomes = (
+        session.query(Outcome)
         .options(
-            selectinload(Case.steps).selectinload(Step.leases),
-            selectinload(Case.steps).selectinload(Step.attempts).selectinload(Attempt.verdicts),
+            selectinload(Outcome.events),
+            selectinload(Outcome.work_items).selectinload(WorkItem.leases),
+            selectinload(Outcome.work_items).selectinload(WorkItem.attempts),
         )
-        .filter(Case.intent_id == intent.intent_id, Case.intent_version == intent.intent_version)
-        .order_by(Case.id)
+        .filter(Outcome.intent_id == intent.intent_id, Outcome.intent_version == intent.intent_version)
+        .order_by(Outcome.created_at, Outcome.id)
         .all()
     )
 
     now = _utc_now()
-    events: list[dict[str, Any]] = [
-        {
-            "sequence_label": "1. Concept brief locked",
-            "title": "Concept brief locked",
-            "what_was_built": "Drop brief accepted and pushed into GWS.",
-            "outcome": "succeeded",
-            "worker_id": "",
-            "occurred_at": _as_utc_iso(intent.created_at),
-        }
-    ]
+    timeline_rows: list[tuple[datetime, dict[str, Any]]] = []
     now_building = {
         "title": "",
         "summary": "",
@@ -120,72 +101,100 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
     }
     latest_active_now_building: tuple[datetime, dict[str, Any]] | None = None
 
-    sequence_number = 2
-    for case in cases:
-        for step in sorted(case.steps, key=lambda item: item.id):
-            active_lease = _active_lease(step, now)
-            latest_attempt = _latest_attempt(step)
-            latest_verdict = _latest_verdict(step)
-            outcome = _outcome_for_step(step, active_lease, latest_attempt, latest_verdict)
-            if outcome is None:
-                continue
-            occurred_at = _sort_timestamp(
-                getattr(active_lease, "issued_at", None),
-                getattr(latest_verdict, "created_at", None),
-                getattr(latest_attempt, "created_at", None),
+    for outcome in outcomes:
+        active_work_item, active_lease = _active_work_item_and_lease(outcome, now)
+        if active_work_item is not None and active_lease is not None:
+            candidate = {
+                "title": outcome.title,
+                "summary": outcome.goal,
+                "worker_id": active_lease.worker_id,
+                "lane": active_work_item.lane,
+                "lease_status": "live",
+                "lease_time_remaining_seconds": max(0, int((active_lease.heartbeat_deadline - now).total_seconds())),
+                "started_at": _as_utc_iso(active_lease.issued_at),
+            }
+            if latest_active_now_building is None or active_lease.issued_at > latest_active_now_building[0]:
+                latest_active_now_building = (active_lease.issued_at, candidate)
+            timeline_rows.append(
+                (
+                    active_lease.issued_at,
+                    {
+                        "title": outcome.title,
+                        "what_was_built": outcome.goal,
+                        "outcome": "live",
+                        "worker_id": active_lease.worker_id,
+                        "occurred_at": _as_utc_iso(active_lease.issued_at),
+                        "outcome_id": outcome.id,
+                        "work_item_id": active_work_item.id,
+                    },
+                )
             )
+            continue
 
-            if outcome == "live" and active_lease is not None:
-                candidate = {
-                    "title": case.title,
-                    "summary": case.goal,
-                    "worker_id": active_lease.worker_id,
-                    "lane": step.lane,
-                    "lease_status": "live",
-                    "lease_time_remaining_seconds": max(
-                        0, int((active_lease.heartbeat_deadline - now).total_seconds())
-                    ),
-                    "started_at": _as_utc_iso(active_lease.issued_at),
-                }
-                if latest_active_now_building is None or active_lease.issued_at > latest_active_now_building[0]:
-                    latest_active_now_building = (active_lease.issued_at, candidate)
-
-            events.append(
-                {
-                    "sequence_label": str(sequence_number),
-                    "step_id": step.id,
-                    "title": case.title,
-                    "what_was_built": case.goal,
-                    "outcome": outcome,
-                    "worker_id": active_lease.worker_id if active_lease is not None else getattr(latest_attempt, "worker_id", ""),
-                    "occurred_at": occurred_at,
-                }
+        if outcome.phase is OutcomePhase.COMPLETED:
+            completed_event = _latest_event(outcome, "outcome_completed")
+            occurred_at = completed_event.created_at if completed_event is not None else outcome.completed_at or outcome.created_at
+            timeline_rows.append(
+                (
+                    occurred_at,
+                    {
+                        "title": outcome.title,
+                        "what_was_built": outcome.result_summary or outcome.goal,
+                        "outcome": _completed_outcome_label(outcome.result),
+                        "worker_id": _event_worker_id(outcome),
+                        "occurred_at": _as_utc_iso(occurred_at),
+                        "outcome_id": outcome.id,
+                        "work_item_id": outcome.current_work_item_id,
+                    },
+                )
             )
-            sequence_number += 1
+            continue
+
+        planning_failed = _latest_event(outcome, "planning_failed")
+        if planning_failed is not None:
+            timeline_rows.append(
+                (
+                    planning_failed.created_at,
+                    {
+                        "title": outcome.title or intent.intent_id,
+                        "what_was_built": outcome.goal or str(planning_failed.payload.get("error", "")),
+                        "outcome": "failed",
+                        "worker_id": str(planning_failed.payload.get("worker_id", "")) or _event_worker_id(outcome),
+                        "occurred_at": _as_utc_iso(planning_failed.created_at),
+                        "outcome_id": outcome.id,
+                        "work_item_id": outcome.current_work_item_id,
+                    },
+                )
+            )
 
     if latest_active_now_building is not None:
         now_building = latest_active_now_building[1]
+
+    timeline_events = [
+        {
+            "sequence_label": "1. Concept brief locked",
+            "title": "Concept brief locked",
+            "what_was_built": "Drop brief accepted and pushed into GWS.",
+            "outcome": "succeeded",
+            "worker_id": "",
+            "occurred_at": _as_utc_iso(intent.created_at),
+        }
+    ]
+    for index, (_, event) in enumerate(sorted(timeline_rows, key=lambda item: item[0]), start=2):
+        timeline_events.append({"sequence_label": str(index), **event})
 
     return {
         "intent": {
             "intent_id": intent.intent_id,
             "intent_version": intent.intent_version,
-            "title": cases[0].title if cases else intent.intent_id,
+            "title": outcomes[0].title if outcomes else intent.intent_id,
             "brief_summary": intent.brief_text.splitlines()[0] if intent.brief_text else "",
         },
         "case_progress": {
-            "total_cases": len(cases),
-            "completed_cases": sum(
-                1
-                for case in cases
-                if case.steps and all(step.status is StepStatus.SUCCEEDED for step in case.steps)
-            ),
-            "active_cases": sum(
-                1
-                for case in cases
-                if any(step.status in {StepStatus.READY, StepStatus.LEASED, StepStatus.RUNNING, StepStatus.VERIFYING} for step in case.steps)
-            ),
+            "total_cases": len(outcomes),
+            "completed_cases": sum(1 for outcome in outcomes if outcome.phase is OutcomePhase.COMPLETED),
+            "active_cases": sum(1 for outcome in outcomes if outcome.phase in {OutcomePhase.PLANNING, OutcomePhase.READY, OutcomePhase.RUNNING}),
         },
         "now_building": now_building,
-        "timeline_events": events,
+        "timeline_events": timeline_events,
     }
