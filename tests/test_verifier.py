@@ -69,3 +69,29 @@ def test_verifier_passes_clean_in_scope_changes():
     assert verdict.result == "pass"
     assert verdict.triggered_lanes == []
     assert verdict.reasons == ["clean"]
+
+
+def test_verifier_rejects_path_traversal_attempt():
+    verdict = verify_attempt(
+        repo="repo-a",
+        touched_paths=["services/../infra/prod.tf"],
+        changed_hunks=["+resource aws_kms_key main {}"],
+        allowed_paths=["services/**"],
+        forbidden_paths=["infra/**"],
+    )
+
+    assert verdict.result == "fail_and_replan"
+    assert "forbidden_path" in verdict.reasons or "out_of_scope" in verdict.reasons or "invalid_path" in verdict.reasons
+
+
+def test_verifier_rejects_absolute_paths():
+    verdict = verify_attempt(
+        repo="repo-a",
+        touched_paths=["/etc/passwd"],
+        changed_hunks=["+malicious"],
+        allowed_paths=["services/**"],
+        forbidden_paths=[],
+    )
+
+    assert verdict.result == "fail_and_replan"
+    assert "invalid_path" in verdict.reasons

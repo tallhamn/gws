@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import posixpath
 from fnmatch import fnmatch
 from types import SimpleNamespace
 
@@ -16,6 +17,18 @@ def verify_attempt(
     policy_path: str = "policy.yaml",
 ):
     del repo
+
+    normalized = []
+    for path in touched_paths:
+        clean = posixpath.normpath(path)
+        if clean.startswith("/") or clean.startswith(".."):
+            return SimpleNamespace(
+                result="fail_and_replan",
+                triggered_lanes=[],
+                reasons=["invalid_path"],
+            )
+        normalized.append(clean)
+    touched_paths = normalized
 
     if any(
         fnmatch(path, pattern)
