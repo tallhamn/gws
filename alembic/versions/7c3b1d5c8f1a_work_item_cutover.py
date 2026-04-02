@@ -18,11 +18,23 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _column_names(table_name: str) -> set[str]:
+    inspector = sa.inspect(op.get_bind())
+    return {column["name"] for column in inspector.get_columns(table_name)}
+
+
 def upgrade() -> None:
     """Upgrade schema."""
-    with op.batch_alter_table("intent_versions") as batch_op:
-        batch_op.add_column(sa.Column("context", sa.Text(), nullable=False, server_default=""))
-        batch_op.add_column(sa.Column("planner_guidance", sa.Text(), nullable=False, server_default=""))
+    intent_version_columns = _column_names("intent_versions")
+    missing_intent_version_columns = {
+        "context": sa.Column("context", sa.Text(), nullable=False, server_default=""),
+        "planner_guidance": sa.Column("planner_guidance", sa.Text(), nullable=False, server_default=""),
+    }
+    if any(column_name not in intent_version_columns for column_name in missing_intent_version_columns):
+        with op.batch_alter_table("intent_versions") as batch_op:
+            for column_name, column in missing_intent_version_columns.items():
+                if column_name not in intent_version_columns:
+                    batch_op.add_column(column)
 
     op.create_table(
         "outcomes",
