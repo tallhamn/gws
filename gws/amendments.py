@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 import json
 
 from sqlalchemy.exc import IntegrityError
@@ -66,7 +66,7 @@ class AmendmentService:
             self._revoke_open_steps(prior_intent.intent_id, prior_intent.intent_version)
 
         proposal.status = "accepted"
-        proposal.accepted_at = datetime.utcnow()
+        proposal.accepted_at = datetime.now(UTC).replace(tzinfo=None)
 
         try:
             self.session.commit()
