@@ -56,7 +56,7 @@ def _outcome_for_step(
     active_lease: Lease | None,
     latest_attempt: Attempt | None,
     latest_verdict: Verdict | None,
-) -> str:
+) -> str | None:
     if active_lease is not None:
         return "live"
     if latest_verdict is not None and latest_verdict.result == VerdictResult.PASS:
@@ -72,6 +72,8 @@ def _outcome_for_step(
             return "failed"
     if step.status is StepStatus.SUCCEEDED:
         return "succeeded"
+    if step.status in {StepStatus.READY, StepStatus.PLANNING, StepStatus.VERIFYING}:
+        return None
     return "failed"
 
 
@@ -125,6 +127,8 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             latest_attempt = _latest_attempt(step)
             latest_verdict = _latest_verdict(step)
             outcome = _outcome_for_step(step, active_lease, latest_attempt, latest_verdict)
+            if outcome is None:
+                continue
             occurred_at = _sort_timestamp(
                 getattr(active_lease, "issued_at", None),
                 getattr(latest_verdict, "created_at", None),

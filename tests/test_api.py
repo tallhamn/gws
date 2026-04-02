@@ -187,6 +187,20 @@ def test_healthz_does_not_require_auth(tmp_path):
     assert response.status_code == 200
 
 
+def test_non_timeline_public_routes_still_require_api_key(tmp_path):
+    database_path = tmp_path / "api.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")
+    engine = make_engine(settings.database_url)
+    Base.metadata.create_all(engine)
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/not-a-route")
+
+    assert response.status_code == 401
+    assert response.json() == {"detail": "Invalid or missing API key"}
+
+
 def test_authenticated_request_succeeds(tmp_path):
     database_path = tmp_path / "api.db"
     settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}", api_key="secret-key")

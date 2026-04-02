@@ -75,7 +75,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                     and request.url.path.endswith("/complete")
                 )
             )
-            if request.url.path == "/healthz" or request.url.path.startswith("/public/") or worker_auth_route:
+            public_timeline_route = request.url.path.startswith("/public/intents/") and request.url.path.endswith("/timeline")
+            if request.url.path == "/healthz" or public_timeline_route or worker_auth_route:
                 return await call_next(request)
 
             auth = request.headers.get("Authorization", "")

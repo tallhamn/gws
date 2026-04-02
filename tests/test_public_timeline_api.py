@@ -249,3 +249,48 @@ def test_public_timeline_uses_attempt_state_for_outcome_when_no_verdict(tmp_path
     assert response.status_code == 200
     data = response.json()
     assert data["timeline_events"][1]["outcome"] == "succeeded"
+
+
+def test_public_timeline_omits_queued_follow_on_steps(tmp_path):
+    database_path = tmp_path / "timeline-queued.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        intent = IntentVersion(intent_id="intent-queued-state", intent_version=1, brief_text="Build queued state")
+        case = Case(
+            intent_id="intent-queued-state",
+            intent_version=1,
+            title="Build queued follow-on",
+            goal="Queued steps should not appear as failures",
+        )
+        ready_step = Step(
+            case=case,
+            repo="studio-tactical-vector",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.READY,
+            allowed_paths=["drops/queued/**"],
+            forbidden_paths=[],
+        )
+        verifying_step = Step(
+            case=case,
+            repo="studio-tactical-vector",
+            lane="coder",
+            step_type="execute",
+            status=StepStatus.VERIFYING,
+            allowed_paths=["drops/queued/**"],
+            forbidden_paths=[],
+        )
+        session.add_all([intent, case, ready_step, verifying_step])
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-queued-state/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [event["outcome"] for event in data["timeline_events"]] == ["succeeded"]
