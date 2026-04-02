@@ -7,6 +7,8 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from sqlalchemy.exc import IntegrityError
+
 from .config import Settings
 from .control_plane import ControlPlaneService
 from .db import Base, make_session_factory
@@ -107,7 +109,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return PullRequestResponse(status=pull_request.status)
 
     @app.post("/steps/{step_id}/complete")
-    def complete_step(step_id: int, payload: CompletedDiffIn) -> dict[str, str]:
+    async def complete_step(step_id: int, payload: CompletedDiffIn) -> dict[str, str]:
         with session_factory() as session:
             service = ControlPlaneService(session)
             try:
@@ -121,6 +123,25 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 if str(exc) == f"unknown step_id: {step_id}":
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Step not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+            # Run artifact verification if the step passed scope checks and has requirements
+            from .models import Step, StepStatus
+            step = session.get(Step, step_id)
+            if step and step.status == StepStatus.SUCCEEDED and step.artifact_requirements:
+                from .verifier import verify_artifacts
+                gateway_url = settings.gateway_url
+                if gateway_url:
+                    artifact_result = await verify_artifacts(
+                        requirements=list(step.artifact_requirements),
+                        gateway_url=gateway_url,
+                        repo=step.repo,
+                    )
+                    if not artifact_result.passed:
+                        step.status = StepStatus.FAILED
+                        session.commit()
+                        logger.info("Step %d artifact verification failed", step_id)
+                        return {"status": "artifact_verification_failed"}
+
             logger.info("Step %d completed, status=%s", step_id, "processed")
             return {"status": "processed"}
 
@@ -194,7 +215,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 planner_guidance=payload.planner_guidance,
             )
             session.add(intent)
-            session.commit()
+            try:
+                session.commit()
+            except IntegrityError as exc:
+                session.rollback()
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Concurrent intent version conflict, retry",
+                ) from exc
             logger.info("Intent %s v%d created", payload.intent_id, new_version)
             return {"intent_id": payload.intent_id, "intent_version": new_version}
 
