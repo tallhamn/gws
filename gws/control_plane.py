@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.exc import IntegrityError
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 
 from .models import Attempt, AttemptResultStatus, Lease, Step, StepStatus, Verdict, VerdictResult
 from .verifier import verify_attempt
+
+logger = logging.getLogger(__name__)
 
 
 class ControlPlaneService:
@@ -18,6 +21,7 @@ class ControlPlaneService:
         if step is None:
             raise ValueError(f"unknown step_id: {step_id}")
         if step.status in {StepStatus.SUCCEEDED, StepStatus.FAILED, StepStatus.REVOKED}:
+            logger.warning("Step %d already in terminal status %s, skipping", step_id, step.status.value)
             return
 
         active_lease = (
@@ -28,10 +32,12 @@ class ControlPlaneService:
             .first()
         )
         if active_lease is None or active_lease.heartbeat_deadline <= datetime.now(UTC).replace(tzinfo=None):
+            logger.warning("Step %d has no active lease for diff application", step_id)
             raise ValueError("step has no active lease")
 
         attempt = active_lease.attempt
         if attempt is None:
+            logger.warning("Step %d has no attempt associated with lease %d", step_id, active_lease.id)
             raise ValueError("step has no attempt")
 
         verdict = verify_attempt(
@@ -46,6 +52,7 @@ class ControlPlaneService:
             attempt.result_status = AttemptResultStatus.ACCEPTED
         else:
             attempt.result_status = AttemptResultStatus.REJECTED
+        logger.info("Step %d verdict: %s", step_id, verdict.result)
         self.session.add(
             Verdict(
                 attempt=attempt,
@@ -106,8 +113,10 @@ class ControlPlaneService:
             .first()
         )
         if active_lease is not None:
+            logger.warning("Step %d already has an active lease, cannot issue new one", step_id)
             raise ValueError(f"step {step_id} already has an active lease")
         if step.status is not StepStatus.READY:
+            logger.warning("Step %d is not ready for lease issuance (status=%s)", step_id, step.status.value)
             raise ValueError(f"step {step_id} is not ready for lease issuance")
 
         deadline = now + timedelta(seconds=ttl_seconds)
@@ -137,7 +146,9 @@ class ControlPlaneService:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
+            logger.warning("Step %d lease issuance failed due to integrity error", step_id)
             raise ValueError(f"step {step_id} already has an active lease") from exc
+        logger.info("Lease %d issued for step %d to worker %s (ttl=%ds)", lease.id, step_id, worker_id, ttl_seconds)
         return lease
 
     def heartbeat_lease(self, lease_id: int, ttl_seconds: int = 60) -> Lease:
@@ -149,12 +160,14 @@ class ControlPlaneService:
         if lease is None:
             raise ValueError(f"unknown lease_id: {lease_id}")
         if lease.expired_at is not None or lease.heartbeat_deadline <= now:
+            logger.warning("Heartbeat rejected: lease %d is expired", lease_id)
             raise ValueError(f"lease {lease_id} is expired")
 
         deadline = now + timedelta(seconds=ttl_seconds)
         lease.heartbeat_deadline = deadline
         lease.expires_at = deadline
         self.session.commit()
+        logger.debug("Lease %d heartbeat extended by %ds", lease_id, ttl_seconds)
         return lease
 
     def expire_leases(self, now_offset_seconds: int = 0) -> int:
@@ -169,4 +182,5 @@ class ControlPlaneService:
             if lease.step.status is StepStatus.LEASED:
                 lease.step.status = StepStatus.READY
         self.session.commit()
+        logger.info("Expired %d leases", len(leases))
         return len(leases)

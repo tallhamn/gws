@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import posixpath
 from fnmatch import fnmatch
 from pathlib import Path
 from types import SimpleNamespace
 
 from .policy import PolicyEngine
+
+logger = logging.getLogger(__name__)
 
 _policy_cache: dict[str, PolicyEngine] = {}
 
@@ -32,6 +35,7 @@ def verify_attempt(
     for path in touched_paths:
         clean = posixpath.normpath(path)
         if clean.startswith("/") or clean.startswith(".."):
+            logger.warning("Invalid path rejected: %s", path)
             return SimpleNamespace(
                 result="fail_and_replan",
                 triggered_lanes=[],
@@ -45,6 +49,7 @@ def verify_attempt(
         for path in touched_paths
         for pattern in forbidden_paths
     ):
+        logger.info("Forbidden path detected in touched_paths")
         return SimpleNamespace(
             result="fail_and_replan",
             triggered_lanes=[],
@@ -67,12 +72,14 @@ def verify_attempt(
         changed_hunks=changed_hunks,
     )
     if policy_verdict.triggered_lanes:
+        logger.info("Policy triggered lanes: %s", policy_verdict.triggered_lanes)
         return SimpleNamespace(
             result="append_governance_step",
             triggered_lanes=policy_verdict.triggered_lanes,
             reasons=["policy_trigger"],
         )
 
+    logger.debug("Verification passed clean")
     return SimpleNamespace(
         result="pass",
         triggered_lanes=[],

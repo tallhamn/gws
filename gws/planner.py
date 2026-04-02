@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 
 from sqlalchemy.orm import Session
 
 from .models import Case, IntentVersion, PullRequest, Step, StepStatus
 from .planner_client import PlannerClient
+
+logger = logging.getLogger(__name__)
 
 
 class PlannerService:
@@ -36,18 +39,26 @@ class PlannerService:
         if active_intent is None:
             raise ValueError(f"no active intent version for intent_id: {pull.intent_id}")
 
+        logger.info("Planning pull request %d against intent %s v%d", pull_request_id, active_intent.intent_id, active_intent.intent_version)
+
         plan = self.planner_client.synthesize(
             brief=active_intent.brief_text,
             lane=pull.lane,
             repo_heads=repo_heads,
             envelope=pull.envelope,
         )
-        plan = self._validate_plan(plan)
+        try:
+            plan = self._validate_plan(plan)
+        except ValueError as exc:
+            logger.warning("Plan validation failed: %s", str(exc))
+            raise
         selected_repo = plan["repo"]
         if selected_repo not in repo_heads:
             raise ValueError(f"missing repo head for repo: {selected_repo}")
         if selected_repo not in pull.repo_access_set:
             raise ValueError(f"repo {selected_repo} is not in pull request access set")
+
+        logger.info("Plan: repo=%s, step_type=%s, title=%s", plan["repo"], plan["step_type"], plan["title"])
 
         case = Case(
             intent_id=active_intent.intent_id,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import UTC, datetime
 import json
 
@@ -7,6 +8,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .models import AmendmentProposal, Case, IntentVersion, Step, StepStatus
+
+logger = logging.getLogger(__name__)
 
 
 class AmendmentService:
@@ -24,8 +27,10 @@ class AmendmentService:
     def accept_proposal(self, proposal_id: int) -> IntentVersion:
         proposal = self.session.get(AmendmentProposal, proposal_id)
         if proposal is None:
+            logger.warning("Unknown proposal_id: %d", proposal_id)
             raise ValueError(f"unknown proposal_id: {proposal_id}")
         if proposal.status != "pending":
+            logger.warning("Proposal %d is not pending (status=%s)", proposal_id, proposal.status)
             raise ValueError(f"proposal {proposal_id} is not pending")
 
         prior_intent = (
@@ -72,7 +77,9 @@ class AmendmentService:
             self.session.commit()
         except IntegrityError as exc:
             self.session.rollback()
+            logger.warning("Proposal %d acceptance failed: base intent version is stale", proposal_id)
             raise ValueError("proposal base intent version is stale") from exc
+        logger.info("Amendment proposal %d accepted, intent %s v%d -> v%d", proposal_id, prior_intent.intent_id, prior_intent.intent_version, new_intent.intent_version)
         return new_intent
 
     def _revoke_open_steps(self, intent_id: str, intent_version: int) -> None:
@@ -88,3 +95,4 @@ class AmendmentService:
         )
         for step in steps:
             step.status = StepStatus.REVOKED
+        logger.info("Breaking amendment: revoked %d open steps for intent %s v%d", len(steps), intent_id, intent_version)
