@@ -893,3 +893,36 @@ def test_work_item_description_defaults_empty(session):
 
     stored = session.get(WorkItem, work_item.id)
     assert stored.description == ""
+
+
+def test_intent_version_status_defaults_to_active(session):
+    from gws.models import IntentStatus
+
+    iv = IntentVersion(intent_id="i-1", intent_version=1, brief_text="Build a thing")
+    session.add(iv)
+    session.commit()
+    session.refresh(iv)
+
+    assert iv.status is IntentStatus.ACTIVE
+
+
+def test_intent_version_status_can_be_set_to_satisfied(session):
+    from gws.models import IntentStatus
+
+    iv = IntentVersion(intent_id="i-1", intent_version=1, brief_text="Build a thing")
+    iv.status = IntentStatus.SATISFIED
+    session.add(iv)
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(IntentVersion, iv.id)
+    assert stored.status is IntentStatus.SATISFIED
+
+
+def test_intent_version_status_rejects_invalid_values(session):
+    iv = IntentVersion(intent_id="i-1", intent_version=1, brief_text="Build a thing")
+    iv.status = "bogus"
+    session.add(iv)
+
+    with pytest.raises(StatementError, match="not among the defined enum values"):
+        session.commit()

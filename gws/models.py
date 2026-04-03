@@ -79,6 +79,11 @@ class AmendmentProposalStatus(str, enum.Enum):
     ACCEPTED = "accepted"
 
 
+class IntentStatus(str, enum.Enum):
+    ACTIVE = "active"
+    SATISFIED = "satisfied"
+
+
 class WorkItemStatus(str, enum.Enum):
     READY = "ready"
     LEASED = "leased"
@@ -307,6 +312,7 @@ class IntentVersion(Base):
     brief_text: Mapped[str] = mapped_column(Text)
     context: Mapped[str] = mapped_column(Text, default="")
     planner_guidance: Mapped[str] = mapped_column(Text, default="")
+    status: Mapped[IntentStatus] = mapped_column(_enum_column(IntentStatus), default=IntentStatus.ACTIVE)
     accepted_amendments: Mapped[list[dict]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
 
