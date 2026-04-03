@@ -173,6 +173,13 @@ Returns the latest version of the given intent.
 
 **Response** `200`: `{ "intent_id", "intent_version", "brief_text", "context", "planner_guidance" }`
 
+#### `POST /intents/{intent_id}/complete`
+
+Manually mark an intent as satisfied. The planner will no longer synthesize new outcomes for this intent. Creating a new intent version (via `POST /intents` or amendment acceptance) resets the status to `active`.
+
+**Response** `200`: `{ "intent_id": "...", "intent_version": 1, "status": "satisfied" }`
+**Response** `404`: Intent not found.
+
 #### `POST /leases/expire`
 
 Expires all leases past their heartbeat deadline. Returns work items to `ready`. Intended to be called on a timer.
