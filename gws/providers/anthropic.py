@@ -29,9 +29,19 @@ class AnthropicPlannerClient:
         if not getattr(message, "content", None):
             raise ValueError("planner response did not contain JSON text")
 
-        content_block = message.content[0]
-        text = getattr(content_block, "text", None)
-        if not isinstance(text, str):
+        text = None
+        for content_block in message.content:
+            candidate = getattr(content_block, "text", None)
+            if not isinstance(candidate, str) and isinstance(content_block, dict):
+                candidate = content_block.get("text")
+            if not isinstance(candidate, str) and hasattr(content_block, "model_dump"):
+                payload = content_block.model_dump()
+                if isinstance(payload, dict):
+                    candidate = payload.get("text")
+            if isinstance(candidate, str) and candidate.strip():
+                text = candidate
+                break
+        if text is None:
             raise ValueError("planner response did not contain JSON text")
 
         return parse_synthesized_plan_text(text)

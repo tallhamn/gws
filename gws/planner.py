@@ -50,6 +50,14 @@ class PlannerService:
             logger.warning("Plan validation failed: %s", str(exc))
             raise ValueError(f"synthesized plan invalid: {exc}") from exc
 
+    @staticmethod
+    def _normalize_selected_repo(selected_repo: str, repo_heads: dict[str, str]) -> str:
+        repo = str(selected_repo or "").strip()
+        if repo in repo_heads or not repo or len(repo_heads) != 1:
+            return repo
+        # Local planner models sometimes return a file path or repo+hash instead of the only repo id we exposed.
+        return next(iter(repo_heads))
+
     def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem] | PlannerResult:
         claim_result = self.session.execute(
             update(PlanningSession)
@@ -109,7 +117,7 @@ class PlannerService:
 
             planning_session.plan_payload = plan.model_dump()
 
-            selected_repo = plan.repo
+            selected_repo = self._normalize_selected_repo(plan.repo, planning_session.repo_heads)
             if selected_repo not in planning_session.repo_heads:
                 raise MaterializePlanError(
                     f"missing repo head for repo: {selected_repo}",

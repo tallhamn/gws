@@ -550,6 +550,33 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     assert stored_outcome.current_work_item_id is None
 
 
+def test_planner_coerces_single_available_repo_when_plan_returns_path_like_repo(session):
+    planning = _planning_session(
+        session,
+        available_repos=["studio-ystackai"],
+        repo_heads={"studio-ystackai": "abc123"},
+    )
+    planner = PlannerService(
+        session,
+        planner_client=FakePlannerClient(
+            {
+                "title": "Implement Dashboard Core with Error System",
+                "goal": "Build the Break the Dashboard game with wobbling components, error counter, timer, and Fix button that worsens the situation.",
+                "repo": "drops/break-the-dashboard/index.html",
+                "allowed_paths": ["drops/break-the-dashboard/**"],
+                "forbidden_paths": [],
+                "work_type": "code",
+            }
+        ),
+    )
+
+    outcome, work_item = planner.materialize_plan(planning.id)
+
+    assert outcome.selected_repo == "studio-ystackai"
+    assert work_item.repo == "studio-ystackai"
+    assert work_item.base_commit == "abc123"
+
+
 def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(monkeypatch):
     diff_text = "\n".join(
         [
@@ -672,3 +699,27 @@ def test_parse_synthesized_plan_text_returns_plan_for_json():
     )
     assert isinstance(result, SynthesizedPlan)
     assert result.title == "Build it"
+
+
+def test_parse_synthesized_plan_text_accepts_python_dict_style_output():
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text(
+        "{'title': 'Build it', 'goal': 'Make it work', 'repo': 'repo-a', "
+        "'allowed_paths': ['src/**'], 'forbidden_paths': [], 'work_type': 'code'}"
+    )
+
+    assert isinstance(result, SynthesizedPlan)
+    assert result.repo == "repo-a"
+
+
+def test_parse_synthesized_plan_text_accepts_trailing_commas():
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text(
+        '{"title":"Build it","goal":"Make it work","repo":"repo-a","allowed_paths":["src/**"],'
+        '"forbidden_paths":[],"work_type":"code",}'
+    )
+
+    assert isinstance(result, SynthesizedPlan)
+    assert result.work_type == "code"

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import ast
 import json
+import re
 from collections.abc import Mapping
 from typing import Optional
 
@@ -39,7 +41,6 @@ def build_system_prompt(
 
 def _extract_json(text: str) -> str:
     """Extract a JSON object from text that may contain prose and code fences."""
-    import re
     # Try the raw text first
     stripped = text.strip()
     if stripped.startswith("{"):
@@ -63,18 +64,57 @@ def _extract_json(text: str) -> str:
     return stripped
 
 
+def _normalize_json_like_text(text: str) -> str:
+    return (
+        text.replace("\u201c", '"')
+        .replace("\u201d", '"')
+        .replace("\u2018", "'")
+        .replace("\u2019", "'")
+        .replace("\u00a0", " ")
+    )
+
+
+def _strip_trailing_commas(text: str) -> str:
+    return re.sub(r",(\s*[}\]])", r"\1", text)
+
+
+def _parse_json_like_mapping(text: str) -> Mapping[str, object]:
+    candidates = [
+        text,
+        _strip_trailing_commas(text),
+        _normalize_json_like_text(text),
+        _strip_trailing_commas(_normalize_json_like_text(text)),
+    ]
+
+    seen: set[str] = set()
+    for candidate in candidates:
+        if candidate in seen:
+            continue
+        seen.add(candidate)
+        try:
+            parsed = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(parsed, Mapping):
+            raise ValueError("planner response JSON must be an object")
+        return parsed
+
+    literal_candidate = _strip_trailing_commas(_normalize_json_like_text(text))
+    try:
+        parsed = ast.literal_eval(literal_candidate)
+    except (ValueError, SyntaxError):
+        raise ValueError("planner response was not valid JSON") from None
+
+    if not isinstance(parsed, Mapping):
+        raise ValueError("planner response JSON must be an object")
+    return parsed
+
+
 def parse_synthesized_plan_text(text: str) -> SynthesizedPlan | PlannerResult:
     stripped = text.strip()
     if stripped == "SATISFIED":
         return PlannerResult.SATISFIED
 
     extracted = _extract_json(stripped)
-    try:
-        parsed = json.loads(extracted)
-    except json.JSONDecodeError as exc:
-        raise ValueError("planner response was not valid JSON") from exc
-
-    if not isinstance(parsed, Mapping):
-        raise ValueError("planner response JSON must be an object")
-
+    parsed = _parse_json_like_mapping(extracted)
     return SynthesizedPlan.model_validate(dict(parsed))
