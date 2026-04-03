@@ -18,7 +18,11 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      - run: pytest -q --cov=gws --cov-report=xml
+      - if: matrix.python-version == '3.12'
+        uses: codecov/codecov-action@v5
+        with:
+          files: coverage.xml
 
   lint:
     runs-on: ubuntu-latest

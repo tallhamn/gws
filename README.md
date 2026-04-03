@@ -1,4 +1,5 @@
 [![CI](https://github.com/tallhamn/gws/actions/workflows/ci.yml/badge.svg)](https://github.com/tallhamn/gws/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/tallhamn/gws/graph/badge.svg)](https://codecov.io/gh/tallhamn/gws)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-Apache%202.0-green.svg)](LICENSE)
 
