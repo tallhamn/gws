@@ -564,18 +564,12 @@ def _init_json_defaults(target, args, kwargs):
         target.accepted_amendments = DeepMutableList()
     if getattr(target, "available_repos", None) is None:
         target.available_repos = DeepMutableList()
-    if getattr(target, "repo_access_set", None) is None:
-        target.repo_access_set = DeepMutableList()
-    if getattr(target, "envelope", None) is None:
-        target.envelope = DeepMutableDict()
     if getattr(target, "repo_heads", None) is None:
         target.repo_heads = DeepMutableDict()
     if getattr(target, "planning_context", None) is None:
         target.planning_context = DeepMutableDict()
     if getattr(target, "plan_payload", None) is None:
         target.plan_payload = DeepMutableDict()
-    if getattr(target, "planning_result", None) is None:
-        target.planning_result = DeepMutableDict()
     if getattr(target, "allowed_paths", None) is None:
         target.allowed_paths = DeepMutableList()
     if getattr(target, "forbidden_paths", None) is None:
