@@ -826,3 +826,19 @@ def test_attempt_result_status_rejects_invalid_values(session):
 
     with pytest.raises(StatementError, match="not among the defined enum values"):
         session.commit()
+
+
+def test_amendment_proposal_status_rejects_invalid_values(session):
+    from gws.models import AmendmentProposal
+
+    proposal = AmendmentProposal(
+        intent_id="intent-1",
+        base_intent_version=1,
+        summary="Add podcast support",
+        amended_brief_text="ship /music and /podcasts",
+        status="bogus",
+    )
+    session.add(proposal)
+
+    with pytest.raises(StatementError, match="not among the defined enum values"):
+        session.commit()

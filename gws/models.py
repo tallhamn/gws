@@ -74,6 +74,11 @@ class PlanningSessionStatus(str, enum.Enum):
     FAILED = "failed"
 
 
+class AmendmentProposalStatus(str, enum.Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+
+
 class WorkItemStatus(str, enum.Enum):
     READY = "ready"
     LEASED = "leased"
@@ -483,7 +488,9 @@ class AmendmentProposal(Base):
     summary: Mapped[str] = mapped_column(Text)
     amended_brief_text: Mapped[str] = mapped_column(Text)
     is_breaking: Mapped[bool] = mapped_column(default=False)
-    status: Mapped[str] = mapped_column(String(32), default="pending")
+    status: Mapped[AmendmentProposalStatus] = mapped_column(
+        _enum_column(AmendmentProposalStatus), default=AmendmentProposalStatus.PENDING
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
     accepted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 

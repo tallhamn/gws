@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from .models import AmendmentProposal, IntentVersion, Outcome, WorkItem, WorkItemStatus
+from .models import AmendmentProposal, AmendmentProposalStatus, IntentVersion, Outcome, WorkItem, WorkItemStatus
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ class AmendmentService:
         if proposal is None:
             logger.warning("Unknown proposal_id: %d", proposal_id)
             raise ValueError(f"unknown proposal_id: {proposal_id}")
-        if proposal.status != "pending":
+        if proposal.status != AmendmentProposalStatus.PENDING:
             logger.warning("Proposal %d is not pending (status=%s)", proposal_id, proposal.status)
             raise ValueError(f"proposal {proposal_id} is not pending")
 
@@ -69,7 +69,7 @@ class AmendmentService:
         if proposal.is_breaking:
             self._revoke_open_work_items(prior_intent.intent_id, prior_intent.intent_version)
 
-        proposal.status = "accepted"
+        proposal.status = AmendmentProposalStatus.ACCEPTED
         proposal.accepted_at = datetime.now(timezone.utc).replace(tzinfo=None)
 
         try:
