@@ -37,25 +37,40 @@ def build_system_prompt(
     return "\n\n".join(parts)
 
 
-def _strip_code_fences(text: str) -> str:
-    """Strip markdown code fences (```json ... ```) if present."""
+def _extract_json(text: str) -> str:
+    """Extract a JSON object from text that may contain prose and code fences."""
+    import re
+    # Try the raw text first
     stripped = text.strip()
-    if stripped.startswith("```"):
-        # Remove opening fence line
-        first_newline = stripped.index("\n")
-        stripped = stripped[first_newline + 1:]
-    if stripped.endswith("```"):
-        stripped = stripped[:-3]
-    return stripped.strip()
+    if stripped.startswith("{"):
+        return stripped
+    # Try extracting from code fences
+    fence_match = re.search(r"```(?:json)?\s*\n(.*?)```", stripped, re.DOTALL)
+    if fence_match:
+        return fence_match.group(1).strip()
+    # Try finding the first { ... } block
+    brace_start = stripped.find("{")
+    if brace_start >= 0:
+        # Find matching closing brace
+        depth = 0
+        for i in range(brace_start, len(stripped)):
+            if stripped[i] == "{":
+                depth += 1
+            elif stripped[i] == "}":
+                depth -= 1
+                if depth == 0:
+                    return stripped[brace_start : i + 1]
+    return stripped
 
 
 def parse_synthesized_plan_text(text: str) -> SynthesizedPlan | PlannerResult:
-    stripped = _strip_code_fences(text)
+    stripped = text.strip()
     if stripped == "SATISFIED":
         return PlannerResult.SATISFIED
 
+    extracted = _extract_json(stripped)
     try:
-        parsed = json.loads(stripped)
+        parsed = json.loads(extracted)
     except json.JSONDecodeError as exc:
         raise ValueError("planner response was not valid JSON") from exc
 
