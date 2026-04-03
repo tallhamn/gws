@@ -2,20 +2,20 @@ workers:
   - token: token-coder-1
     worker_id: coder1
     lane: coder
-    repo_access_set: ["studio-ystackai"]
+    repo_access_set: ["studio-ystackai", "studio-tactical-vector"]
   - token: token-coder-2
     worker_id: coder2
     lane: coder
-    repo_access_set: ["studio-ystackai"]
+    repo_access_set: ["studio-ystackai", "studio-tactical-vector"]
   - token: token-artist
     worker_id: artist
     lane: artist
-    repo_access_set: ["studio-ystackai"]
+    repo_access_set: ["studio-ystackai", "studio-tactical-vector"]
   - token: token-musician
     worker_id: musician
     lane: musician
-    repo_access_set: ["studio-ystackai"]
+    repo_access_set: ["studio-ystackai", "studio-tactical-vector"]
   - token: token-writer
     worker_id: writer
     lane: writer
-    repo_access_set: ["studio-ystackai"]
+    repo_access_set: ["studio-ystackai", "studio-tactical-vector"]

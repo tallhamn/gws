@@ -11,7 +11,6 @@ authors = [
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Intended Audience :: Developers",
-  "License :: OSI Approved :: Apache Software License",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
@@ -33,6 +32,9 @@ dev = ["httpx", "pytest", "pytest-asyncio", "pytest-cov", "ruff"]
 [project.urls]
 Source = "https://github.com/tallhamn/gws"
 Issues = "https://github.com/tallhamn/gws/issues"
+
+[tool.setuptools.packages.find]
+include = ["gws*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
