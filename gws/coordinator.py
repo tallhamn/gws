@@ -5,6 +5,7 @@ from typing import Optional
 
 from sqlalchemy.orm import Session
 
+from .contracts import PlannerResult
 from .models import (
     IntentVersion,
     Outcome,
@@ -45,7 +46,7 @@ class PlanningCoordinator:
         lane: str,
         available_repos: list[str],
         repo_heads: dict[str, str],
-    ) -> tuple[Outcome, WorkItem]:
+    ) -> tuple[Outcome, WorkItem] | None:
         intent = (
             self.session.query(IntentVersion)
             .filter(IntentVersion.intent_id == intent_id)
@@ -95,7 +96,13 @@ class PlanningCoordinator:
         planning_session_id = planning_session.id
 
         try:
-            outcome, work_item = self.planner_service.materialize_plan(planning_session_id)
+            result = self.planner_service.materialize_plan(planning_session_id)
+
+            if isinstance(result, PlannerResult):
+                self.session.commit()
+                return None
+
+            outcome, work_item = result
             self.session.add(
                 OutcomeEvent(
                     outcome=outcome,

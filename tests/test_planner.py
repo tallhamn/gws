@@ -613,6 +613,40 @@ def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
     assert stored_outcome.result_summary == "Intent already satisfied"
 
 
+def test_coordinator_returns_none_when_planner_is_satisfied(session):
+    from gws.contracts import PlannerResult
+    from gws.coordinator import PlanningCoordinator
+    from gws.models import IntentStatus
+
+    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
+    session.commit()
+
+    coordinator = PlanningCoordinator(
+        session,
+        planner_client=FakePlannerClient(PlannerResult.SATISFIED),
+        planner_provider="fake",
+        planner_model=None,
+    )
+
+    result = coordinator.plan_outcome(
+        intent_id="intent-1",
+        worker_id="coder-1",
+        lane="coder",
+        available_repos=["repo-a"],
+        repo_heads={"repo-a": "abc123"},
+    )
+
+    assert result is None
+
+    intent = (
+        session.query(IntentVersion)
+        .filter(IntentVersion.intent_id == "intent-1")
+        .order_by(IntentVersion.intent_version.desc())
+        .first()
+    )
+    assert intent.status is IntentStatus.SATISFIED
+
+
 def test_parse_synthesized_plan_text_returns_satisfied_for_satisfied_string():
     from gws.contracts import PlannerResult
     from gws.providers.common import parse_synthesized_plan_text

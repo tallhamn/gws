@@ -107,6 +107,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if intent is None:
             return None
 
+        from .models import IntentStatus
+
+        if intent.status is IntentStatus.SATISFIED:
+            return None
+
         # Only one worker plans at a time; others get None (no work) instead of queueing
         if not _planning_lock.acquire(blocking=False):
             logger.info("JIT planning already in progress, skipping for lane %s", worker.lane)
@@ -122,13 +127,16 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 planner_model=settings.planner_model,
                 lane_capabilities=policy.lane_capabilities(),
             )
-            _outcome, work_item = coordinator.plan_outcome(
+            result = coordinator.plan_outcome(
                 intent_id=intent.intent_id,
                 worker_id=worker.worker_id,
                 lane=worker.lane,
                 available_repos=accessible_repos,
                 repo_heads=eligible_repo_heads,
             )
+            if result is None:
+                return None
+            _outcome, work_item = result
             logger.info("JIT planned work item %d for lane %s (intent=%s)", work_item.id, worker.lane, intent.intent_id)
             return work_item
         except Exception as exc:
