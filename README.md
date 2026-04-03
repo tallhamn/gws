@@ -18,40 +18,55 @@ At the macro level, GWS does pathfinding: choose the next outcome toward the goa
 ## Architecture
 
 ```
-                        ┌──────────────────┐
-                        │  IntentVersion   │  Immutable, versioned desired end state
-                        └────────┬─────────┘
-                                 │ 1:N
-                        ┌────────▼─────────┐
-                ┌───────┤     Outcome      ├───────┐
-                │       │                  │       │
-                │       └────────┬─────────┘       │
-                │ 1:N            │ 1:N             │ 1:N (append-only)
-     ┌──────────▼──┐    ┌───────▼────────┐   ┌────▼──────────┐
-     │  Planning   │    │   WorkItem     │   │ OutcomeEvent  │
-     │  Session    │    │                │   │               │
-     └─────────────┘    └───────┬────────┘   └───────────────┘
-          audit                 │ worker pulls
-                        ┌───────▼────────┐
-                        │     Lease      │  Time-bounded claim
-                        └───────┬────────┘
-                                │ worker submits
-                        ┌───────▼────────┐
-                        │    Attempt     │  Result + diff ref
-                        └───────┬────────┘
-                                │ governance evaluates
-                        ┌───────▼────────┐
-                        │    Verdict     │  pass / fail / append review
-                        └───────┬────────┘
-                                │
-                ┌───────────────┼───────────────┐
-                ▼               ▼               ▼
-             pass:         fail_and_replan:   append_governance_step:
-          outcome done     outcome failed     new review WorkItem
-                                              appended to outcome
+                         ┌──────────────────┐
+                         │  IntentVersion   │  Immutable, versioned desired end state
+                         └────────┬─────────┘
+                                  │ 1:N
+                         ┌────────▼─────────┐
+                 ┌───────┤     Outcome      ├───────┐
+                 │       │                  │       │
+                 │       └────────┬─────────┘       │
+                 │ 1:N            │ 1:N             │ 1:N (append-only)
+      ┌──────────▼──┐    ┌───────▼────────┐   ┌────▼──────────┐
+      │  Planning   │    │   WorkItem     │   │ OutcomeEvent  │
+      │  Session    │    │                │   │               │
+      └─────────────┘    └───────┬────────┘   └───────────────┘
+           audit                 │ worker pulls
+                         ┌───────▼────────┐
+                         │     Lease      │  Time-bounded claim
+                         └───────┬────────┘
+                                 │ worker submits diff
+                         ┌───────▼────────┐
+                         │    Attempt     │  Touched paths + changed hunks
+                         └───────┬────────┘
+                                 │
+              ╔══════════════════▼══════════════════╗
+              ║           GOVERNANCE                ║
+              ║                                     ║
+              ║  Policy evaluates the actual diff,  ║
+              ║  not the worker's claimed intent.   ║
+              ║                                     ║
+              ║  • Path triggers:  auth/** touched?  ║
+              ║  • Content triggers: "jwt" in hunk? ║
+              ╚══════════════════╤══════════════════╝
+                                 │
+                         ┌───────▼────────┐
+                         │    Verdict     │
+                         └───────┬────────┘
+                                 │
+             ┌───────────────────┼───────────────────┐
+             ▼                   ▼                   ▼
+          pass:            fail_and_replan:    append_governance_step:
+       outcome done        outcome failed     new review WorkItem ──┐
+                                              appended to outcome   │
+                                                                    │
+          ┌─────────────────────────────────────────────────────────┘
+          │  Review worker picks up the new WorkItem,
+          │  goes through the same Lease → Attempt → Governance cycle.
+          └─────────────────────────────────────────────────────────
 ```
 
-**Execution cycle:** A worker requests work → GWS either finds a ready WorkItem or JIT-plans a new Outcome → issues a Lease → worker executes and submits an Attempt → governance produces a Verdict → the Verdict determines whether the outcome completes, fails, or grows a review step.
+**Execution cycle:** A worker requests work → GWS either finds a ready WorkItem or JIT-plans a new Outcome → issues a Lease → worker executes and submits an Attempt → governance evaluates the actual diff against policy → the Verdict determines whether the outcome completes, fails, or grows a review step that re-enters the same cycle.
 
 ## Core Concepts
 
