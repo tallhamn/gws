@@ -8,7 +8,6 @@ from sqlalchemy.pool import StaticPool
 from gws.db import make_engine
 from gws.models import (
     Attempt,
-    AttemptResultStatus,
     IntentVersion,
     Lease,
     Outcome,

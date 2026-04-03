@@ -20,17 +20,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "intent_versions",
-        sa.Column("status", sa.String(32), nullable=False, server_default="active"),
-    )
-    op.create_check_constraint(
-        "ck_intent_versions_status_intentstatus",
-        "intent_versions",
-        sa.column("status").in_(["active", "satisfied"]),
-    )
+    with op.batch_alter_table("intent_versions", recreate="always") as batch_op:
+        batch_op.add_column(
+            sa.Column("status", sa.String(32), nullable=False, server_default="active"),
+        )
+        batch_op.create_check_constraint(
+            "ck_intent_versions_status_intentstatus",
+            sa.column("status").in_(["active", "satisfied"]),
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_intent_versions_status_intentstatus", "intent_versions", type_="check")
-    op.drop_column("intent_versions", "status")
+    with op.batch_alter_table("intent_versions", recreate="always") as batch_op:
+        batch_op.drop_constraint("ck_intent_versions_status_intentstatus", type_="check")
+        batch_op.drop_column("status")

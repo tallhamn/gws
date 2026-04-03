@@ -34,7 +34,8 @@ def test_anthropic_planner_client_uses_first_text_block_when_thinking_block_prec
     message = Message(
         ThinkingBlock("reasoning"),
         TextBlock(
-            '{"title":"Plan","goal":"Do the thing","repo":"repo","work_type":"code","description":"Ship it","allowed_paths":["src/**"],"forbidden_paths":[]}'
+            '{"title":"Plan","goal":"Do the thing","repo":"repo","work_type":"code",'
+            '"description":"Ship it","allowed_paths":["src/**"],"forbidden_paths":[]}'
         ),
     )
 
@@ -53,7 +54,10 @@ def test_anthropic_planner_client_reads_text_from_dict_block():
         {"type": "thinking", "thinking": "reasoning"},
         {
             "type": "text",
-            "text": '{"title":"Plan","goal":"Do the thing","repo":"repo","work_type":"code","description":"","allowed_paths":["src/**"],"forbidden_paths":[]}',
+            "text": (
+                '{"title":"Plan","goal":"Do the thing","repo":"repo","work_type":"code",'
+                '"description":"","allowed_paths":["src/**"],"forbidden_paths":[]}'
+            ),
         },
     )
 

@@ -440,9 +440,7 @@ def test_governance_work_items_get_descriptive_context(session):
     )
 
     review_items = (
-        session.query(WorkItem)
-        .filter(WorkItem.outcome_id == outcome.id, WorkItem.work_type == "review")
-        .all()
+        session.query(WorkItem).filter(WorkItem.outcome_id == outcome.id, WorkItem.work_type == "review").all()
     )
 
     assert len(review_items) == 1

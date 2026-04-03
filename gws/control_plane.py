@@ -82,7 +82,10 @@ class ControlPlaneService:
                 repo=work_item.repo,
                 lane=lane,
                 work_type="review",
-                description=f"Review changes from work item {work_item.id} ({work_item.work_type}). Policy triggered {lane} review.",
+                description=(
+                    f"Review changes from work item {work_item.id} "
+                    f"({work_item.work_type}). Policy triggered {lane} review."
+                ),
                 status=WorkItemStatus.READY,
                 allowed_paths=list(work_item.allowed_paths),
                 forbidden_paths=list(work_item.forbidden_paths),

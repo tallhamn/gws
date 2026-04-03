@@ -561,7 +561,10 @@ def test_planner_coerces_single_available_repo_when_plan_returns_path_like_repo(
         planner_client=FakePlannerClient(
             {
                 "title": "Implement Dashboard Core with Error System",
-                "goal": "Build the Break the Dashboard game with wobbling components, error counter, timer, and Fix button that worsens the situation.",
+                "goal": (
+                    "Build the Break the Dashboard game with wobbling components, "
+                    "error counter, timer, and Fix button that worsens the situation."
+                ),
                 "repo": "drops/break-the-dashboard/index.html",
                 "allowed_paths": ["drops/break-the-dashboard/**"],
                 "forbidden_paths": [],
@@ -729,7 +732,9 @@ def test_planner_skips_duplicate_of_succeeded_outcome_for_same_intent_and_repo(s
         planner_client=FakePlannerClient(
             {
                 "title": "Implement core dashboard UI with error counters and wobbling components",
-                "goal": "Create the main dashboard interface with error counters, wobbling UI elements, and a ticking timer",
+                "goal": (
+                    "Create the main dashboard interface with error counters, wobbling UI elements, and a ticking timer"
+                ),
                 "repo": "repo-a",
                 "allowed_paths": ["drops/**"],
                 "forbidden_paths": [],

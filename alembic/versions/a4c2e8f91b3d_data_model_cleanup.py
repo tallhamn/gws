@@ -26,13 +26,14 @@ def upgrade() -> None:
     # Replace bare varchar status on amendment_proposals with constrained enum
     # The existing values ("pending", "accepted") are valid members of the new enum,
     # so no data migration is needed — just add the check constraint.
-    op.create_check_constraint(
-        "ck_amendment_proposals_status_amendmentproposalstatus",
-        "amendment_proposals",
-        sa.column("status").in_(["pending", "accepted"]),
-    )
+    with op.batch_alter_table("amendment_proposals", recreate="always") as batch_op:
+        batch_op.create_check_constraint(
+            "ck_amendment_proposals_status_amendmentproposalstatus",
+            sa.column("status").in_(["pending", "accepted"]),
+        )
 
 
 def downgrade() -> None:
-    op.drop_constraint("ck_amendment_proposals_status_amendmentproposalstatus", "amendment_proposals", type_="check")
+    with op.batch_alter_table("amendment_proposals", recreate="always") as batch_op:
+        batch_op.drop_constraint("ck_amendment_proposals_status_amendmentproposalstatus", type_="check")
     op.drop_column("work_items", "description")

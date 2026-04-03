@@ -28,6 +28,7 @@ def test_claude_code_planner_client_invokes_cli_with_plan_mode(monkeypatch):
         return FakeCompletedProcess()
 
     monkeypatch.setattr("gws.providers.claude_code.subprocess.run", fake_run)
+    monkeypatch.setattr(ClaudeCodePlannerClient, "is_available", staticmethod(lambda command="claude": True))
 
     client = ClaudeCodePlannerClient(command="claude", model="sonnet", effort="max", timeout=12.5)
     result = client.synthesize(

@@ -144,8 +144,9 @@ def test_work_item_cutover_migrates_production_like_predecessor_schema(tmp_path)
     database_path = tmp_path / "gws-prod-like.db"
     _run_sqlite_script(database_path, PRODUCTION_LIKE_PREDECESSOR_SCHEMA)
 
-    config = Config("/Users/marcus/Documents/Github/gws/alembic.ini")
-    config.set_main_option("script_location", "/Users/marcus/Documents/Github/gws/alembic")
+    repo_root = Path(__file__).resolve().parents[1]
+    config = Config(str(repo_root / "alembic.ini"))
+    config.set_main_option("script_location", str(repo_root / "alembic"))
 
     import os
 
