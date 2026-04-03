@@ -41,3 +41,11 @@ The control plane depends on a generic planner client boundary. Concrete backend
 ## 10. No Provider Plugin Framework Yet
 
 The repo keeps one clean seam for planner adapters, but deliberately avoids registries, dynamic plugin loading, or provider capability frameworks. The current goal is a clean replacement boundary, not a platform for plugins.
+
+## 11. Bounded And Unbounded Intents
+
+Not all work converges to a discrete end state. A convergent intent ("add user authentication") has a natural completion point — the planner sees the finished code and returns `SATISFIED`. An unbounded intent ("build and polish a platformer until it's amazing") never satisfies — the planner always finds something to improve.
+
+GWS handles both without special-casing. The planner evaluates the current repo state against the intent brief on every planning cycle. Convergent intents terminate automatically via `SATISFIED`. Unbounded intents keep producing work items until an external signal stops them — a human calls `POST /intents/{id}/complete`, an amendment redirects the goal, or workers simply stop polling (budget or time exhausted).
+
+The intent controls whether work is bounded or unbounded. The control plane doesn't need to know the difference.
