@@ -1,7 +1,21 @@
 [project]
 name = "gws"
 version = "0.1.0"
+description = "Control plane for governed, mostly unattended software delivery"
+readme = "README.md"
+license = "Apache-2.0"
 requires-python = ">=3.11"
+authors = [
+  { name = "Marcus Tallhamn" },
+]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
 dependencies = [
   "alembic",
   "fastapi",
@@ -14,8 +28,19 @@ dependencies = [
 
 [project.optional-dependencies]
 anthropic = ["anthropic"]
-dev = ["httpx", "pytest", "pytest-asyncio"]
+dev = ["httpx", "pytest", "pytest-asyncio", "ruff"]
+
+[project.urls]
+Source = "https://github.com/tallhamn/gws"
+Issues = "https://github.com/tallhamn/gws/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
