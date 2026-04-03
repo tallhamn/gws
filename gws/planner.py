@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -58,6 +59,57 @@ class PlannerService:
         # Local planner models sometimes return a file path or repo+hash instead of the only repo id we exposed.
         return next(iter(repo_heads))
 
+    @staticmethod
+    def _normalize_task_text(text: str) -> str:
+        lowered = re.sub(r"[^a-z0-9]+", " ", str(text or "").lower())
+        return re.sub(r"\s+", " ", lowered).strip()
+
+    @classmethod
+    def _task_texts_equivalent(cls, left: str, right: str) -> bool:
+        normalized_left = cls._normalize_task_text(left)
+        normalized_right = cls._normalize_task_text(right)
+        if not normalized_left or not normalized_right:
+            return False
+        if normalized_left == normalized_right:
+            return True
+        left_tokens = set(normalized_left.split())
+        right_tokens = set(normalized_right.split())
+        if min(len(left_tokens), len(right_tokens)) < 4:
+            return False
+        overlap = len(left_tokens & right_tokens)
+        return overlap / max(1, min(len(left_tokens), len(right_tokens))) >= 0.8
+
+    def _find_duplicate_outcome(
+        self,
+        *,
+        planning_session: PlanningSession,
+        selected_repo: str,
+        plan: SynthesizedPlan,
+    ) -> Outcome | None:
+        duplicate_candidates = (
+            self.session.query(Outcome)
+            .filter(
+                Outcome.intent_id == planning_session.outcome.intent_id,
+                Outcome.intent_version == planning_session.outcome.intent_version,
+                Outcome.id != planning_session.outcome.id,
+                Outcome.selected_repo == selected_repo,
+            )
+            .order_by(Outcome.created_at.desc(), Outcome.id.desc())
+            .all()
+        )
+        for existing in duplicate_candidates:
+            if existing.phase in {OutcomePhase.READY, OutcomePhase.RUNNING}:
+                pass
+            elif existing.phase is OutcomePhase.COMPLETED and existing.result is OutcomeResult.SUCCEEDED:
+                pass
+            else:
+                continue
+            if self._task_texts_equivalent(existing.title, plan.title):
+                return existing
+            if self._task_texts_equivalent(existing.goal, plan.goal):
+                return existing
+        return None
+
     def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem] | PlannerResult:
         claim_result = self.session.execute(
             update(PlanningSession)
@@ -95,21 +147,21 @@ class PlannerService:
                 planning_session.status = PlanningSessionStatus.SUCCEEDED
                 planning_session.plan_payload = {"result": raw_result.value}
                 planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-
-                intent = (
-                    self.session.query(IntentVersion)
-                    .filter(
-                        IntentVersion.intent_id == planning_session.outcome.intent_id,
-                        IntentVersion.intent_version == planning_session.outcome.intent_version,
+                if raw_result is PlannerResult.SATISFIED:
+                    intent = (
+                        self.session.query(IntentVersion)
+                        .filter(
+                            IntentVersion.intent_id == planning_session.outcome.intent_id,
+                            IntentVersion.intent_version == planning_session.outcome.intent_version,
+                        )
+                        .one()
                     )
-                    .one()
-                )
-                intent.status = IntentStatus.SATISFIED
+                    intent.status = IntentStatus.SATISFIED
 
-                planning_session.outcome.phase = OutcomePhase.COMPLETED
-                planning_session.outcome.result = OutcomeResult.ABANDONED
-                planning_session.outcome.result_summary = "Intent already satisfied"
-                planning_session.outcome.completed_at = planning_session.completed_at
+                    planning_session.outcome.phase = OutcomePhase.COMPLETED
+                    planning_session.outcome.result = OutcomeResult.ABANDONED
+                    planning_session.outcome.result_summary = "Intent already satisfied"
+                    planning_session.outcome.completed_at = planning_session.completed_at
                 self.session.flush()
                 return raw_result
 
@@ -128,6 +180,22 @@ class PlannerService:
                     f"repo {selected_repo} is not in planning session available repos",
                     plan_payload=planning_session.plan_payload,
                 )
+            duplicate_outcome = self._find_duplicate_outcome(
+                planning_session=planning_session,
+                selected_repo=selected_repo,
+                plan=plan,
+            )
+            if duplicate_outcome is not None:
+                planning_session.status = PlanningSessionStatus.SUCCEEDED
+                planning_session.error_detail = ""
+                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                planning_session.plan_payload = {
+                    **planning_session.plan_payload,
+                    "result": PlannerResult.DUPLICATE.value,
+                    "duplicate_outcome_id": duplicate_outcome.id,
+                }
+                self.session.flush()
+                return PlannerResult.DUPLICATE
         except Exception as exc:
             if self.session.is_active:
                 planning_session.status = PlanningSessionStatus.FAILED

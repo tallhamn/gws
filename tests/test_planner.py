@@ -640,6 +640,110 @@ def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
     assert stored_outcome.result_summary == "Intent already satisfied"
 
 
+def test_planner_skips_duplicate_active_outcome_for_same_intent_and_repo(session):
+    from gws.contracts import PlannerResult
+
+    planning = _planning_session(session)
+    existing = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Implement core Break the Dashboard game mechanics",
+        goal="Create the main game interface with error counters and wobbling components",
+        phase=OutcomePhase.RUNNING,
+        selected_repo="repo-a",
+    )
+    existing_work_item = WorkItem(
+        outcome=existing,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.LEASED,
+        base_commit="abc123",
+    )
+    session.add_all([existing, existing_work_item])
+    session.flush()
+    existing.current_work_item_id = existing_work_item.id
+    session.commit()
+
+    planner = PlannerService(
+        session,
+        planner_client=FakePlannerClient(
+            {
+                "title": "Implement Break the Dashboard game mechanics",
+                "goal": "Create the main game interface with error counters and wobbling components",
+                "repo": "repo-a",
+                "allowed_paths": ["drops/**"],
+                "forbidden_paths": [],
+                "work_type": "execute",
+            }
+        ),
+    )
+
+    result = planner.materialize_plan(planning.id)
+
+    assert result is PlannerResult.DUPLICATE
+
+    session.expunge_all()
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
+
+    assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
+    assert stored_planning.completed_at is not None
+    assert stored_planning.plan_payload["result"] == "duplicate"
+    assert stored_planning.plan_payload["duplicate_outcome_id"] == existing.id
+    assert session.query(WorkItem).count() == 1
+    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.current_work_item_id is None
+
+
+def test_planner_skips_duplicate_of_succeeded_outcome_for_same_intent_and_repo(session):
+    from gws.contracts import PlannerResult
+
+    planning = _planning_session(session)
+    existing = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Implement core dashboard UI with error counters and wobbling components",
+        goal="Create the main dashboard interface with error counters, wobbling UI elements, and a ticking timer",
+        phase=OutcomePhase.COMPLETED,
+        result=OutcomeResult.SUCCEEDED,
+        selected_repo="repo-a",
+    )
+    existing_work_item = WorkItem(
+        outcome=existing,
+        sequence_index=0,
+        repo="repo-a",
+        lane="artist",
+        work_type="execute",
+        status=WorkItemStatus.SUCCEEDED,
+        base_commit="abc123",
+    )
+    session.add_all([existing, existing_work_item])
+    session.flush()
+    existing.current_work_item_id = existing_work_item.id
+    session.commit()
+
+    planner = PlannerService(
+        session,
+        planner_client=FakePlannerClient(
+            {
+                "title": "Implement core dashboard UI with error counters and wobbling components",
+                "goal": "Create the main dashboard interface with error counters, wobbling UI elements, and a ticking timer",
+                "repo": "repo-a",
+                "allowed_paths": ["drops/**"],
+                "forbidden_paths": [],
+                "work_type": "execute",
+            }
+        ),
+    )
+
+    result = planner.materialize_plan(planning.id)
+
+    assert result is PlannerResult.DUPLICATE
+    assert session.query(WorkItem).count() == 1
+
+
 def test_coordinator_returns_none_when_planner_is_satisfied(session):
     from gws.contracts import PlannerResult
     from gws.coordinator import PlanningCoordinator

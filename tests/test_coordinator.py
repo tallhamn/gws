@@ -111,7 +111,7 @@ def test_coordinator_creates_outcome_planning_session_and_work_item(session):
     assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
     assert stored_planning.planner_provider == "claude_code"
     assert stored_planning.planner_model == "claude-sonnet-4-20250514"
-    assert stored_planning.plan_payload == planner_client.plan
+    assert stored_planning.plan_payload == {**planner_client.plan, "description": ""}
 
     assert [event.event_type for event in stored_events] == ["planning_started", "planning_succeeded"]
     assert planner_client.calls == [
@@ -119,12 +119,74 @@ def test_coordinator_creates_outcome_planning_session_and_work_item(session):
             "brief": "ship /music",
             "lane": "coder",
             "repo_heads": {"repo-a": "abc123"},
-            "envelope": {},
+            "envelope": {"existing_outcomes": []},
             "lane_capabilities": {"coder": "writes product code"},
             "intent_context": "music domain context",
             "planner_guidance": "prefer endpoints over refactors",
         }
     ]
+
+
+def test_coordinator_includes_existing_outcomes_in_planning_envelope(session):
+    session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music"))
+    existing = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Existing dashboard task",
+        goal="Build the existing dashboard shell",
+        phase=OutcomePhase.RUNNING,
+        selected_repo="repo-a",
+    )
+    existing_work_item = WorkItem(
+        outcome=existing,
+        sequence_index=0,
+        repo="repo-a",
+        lane="artist",
+        work_type="execute",
+    )
+    session.add_all([existing, existing_work_item])
+    session.flush()
+    existing.current_work_item_id = existing_work_item.id
+    session.commit()
+
+    planner_client = FakePlannerClient(
+        {
+            "title": "Create /music endpoint",
+            "goal": "Implement /music experience",
+            "repo": "repo-a",
+            "allowed_paths": ["services/**"],
+            "forbidden_paths": [],
+            "work_type": "execute",
+        }
+    )
+    coordinator = PlanningCoordinator(
+        session,
+        planner_client=planner_client,
+        planner_provider="claude_code",
+        planner_model="claude-sonnet-4-20250514",
+    )
+
+    coordinator.plan_outcome(
+        intent_id="intent-1",
+        worker_id="coder-1",
+        lane="coder",
+        available_repos=["repo-a"],
+        repo_heads={"repo-a": "abc123"},
+    )
+
+    assert planner_client.calls[0]["envelope"] == {
+        "existing_outcomes": [
+            {
+                "title": "Existing dashboard task",
+                "goal": "Build the existing dashboard shell",
+                "repo": "repo-a",
+                "phase": "running",
+                "result": None,
+                "lane": "artist",
+                "work_type": "execute",
+            }
+        ]
+    }
 
 
 def test_coordinator_commits_success_state_and_event_together(session, monkeypatch):
@@ -209,7 +271,7 @@ def test_coordinator_records_failed_planning_session_and_event(session):
 
     assert stored_planning.status is PlanningSessionStatus.FAILED
     assert "repo repo-b is not in planning session available repos" in stored_planning.error_detail
-    assert stored_planning.plan_payload == planner_client.plan
+    assert stored_planning.plan_payload == {**planner_client.plan, "description": ""}
 
     assert [event.event_type for event in stored_events] == ["planning_started", "planning_failed"]
 

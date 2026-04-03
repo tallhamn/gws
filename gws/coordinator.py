@@ -38,6 +38,50 @@ class PlanningCoordinator:
             lane_capabilities=lane_capabilities,
         )
 
+    def _planning_envelope(
+        self,
+        *,
+        intent_id: str,
+        intent_version: int,
+        available_repos: list[str],
+    ) -> dict:
+        repo_filter = set(available_repos)
+        existing_outcomes: list[dict[str, object | None]] = []
+        outcomes = (
+            self.session.query(Outcome)
+            .filter(
+                Outcome.intent_id == intent_id,
+                Outcome.intent_version == intent_version,
+            )
+            .order_by(Outcome.created_at.desc(), Outcome.id.desc())
+            .all()
+        )
+        for outcome in outcomes:
+            repo = str(outcome.selected_repo or "").strip()
+            if not repo or repo not in repo_filter:
+                continue
+            title = str(outcome.title or "").strip()
+            goal = str(outcome.goal or "").strip()
+            if not title and not goal:
+                continue
+            current_work_item = outcome.current_work_item
+            if current_work_item is None and outcome.work_items:
+                current_work_item = max(outcome.work_items, key=lambda item: (item.sequence_index, item.id))
+            existing_outcomes.append(
+                {
+                    "title": title,
+                    "goal": goal,
+                    "repo": repo,
+                    "phase": outcome.phase.value,
+                    "result": outcome.result.value if outcome.result is not None else None,
+                    "lane": current_work_item.lane if current_work_item is not None else "",
+                    "work_type": current_work_item.work_type if current_work_item is not None else "",
+                }
+            )
+            if len(existing_outcomes) >= 20:
+                break
+        return {"existing_outcomes": existing_outcomes}
+
     def plan_outcome(
         self,
         *,
@@ -55,6 +99,12 @@ class PlanningCoordinator:
         )
         if intent is None:
             raise ValueError(f"no active intent version for intent_id: {intent_id}")
+
+        envelope = self._planning_envelope(
+            intent_id=intent.intent_id,
+            intent_version=intent.intent_version,
+            available_repos=available_repos,
+        )
 
         outcome = Outcome(
             intent_id=intent.intent_id,
@@ -74,7 +124,7 @@ class PlanningCoordinator:
             repo_heads=dict(repo_heads),
             planning_context={
                 "brief": intent.brief_text,
-                "envelope": {},
+                "envelope": envelope,
                 "intent_context": intent.context,
                 "planner_guidance": intent.planner_guidance,
             },

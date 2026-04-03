@@ -7,6 +7,7 @@ from pydantic import BaseModel, Field
 
 class PlannerResult(str, enum.Enum):
     SATISFIED = "satisfied"
+    DUPLICATE = "duplicate"
 
 
 class SynthesizedPlan(BaseModel):
