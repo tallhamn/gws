@@ -168,7 +168,11 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
 
         if outcome.phase is OutcomePhase.COMPLETED:
             completed_event = _latest_event(outcome, "outcome_completed")
-            occurred_at = completed_event.created_at if completed_event is not None else outcome.completed_at or outcome.created_at
+            occurred_at = (
+                completed_event.created_at
+                if completed_event is not None
+                else outcome.completed_at or outcome.created_at
+            )
             timeline_rows.append(
                 (
                     occurred_at,
@@ -231,7 +235,9 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             "total_outcomes": len(outcomes),
             "completed_outcomes": sum(1 for outcome in outcomes if outcome.phase is OutcomePhase.COMPLETED),
             "active_outcomes": sum(
-                1 for outcome in outcomes if outcome.phase in {OutcomePhase.PLANNING, OutcomePhase.READY, OutcomePhase.RUNNING}
+                1
+                for outcome in outcomes
+                if outcome.phase in {OutcomePhase.PLANNING, OutcomePhase.READY, OutcomePhase.RUNNING}
             ),
         },
         "now_building": now_building,

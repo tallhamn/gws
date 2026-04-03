@@ -80,7 +80,9 @@ def test_worker_lease_issues_lease_for_ready_work_item(tmp_path, worker_registry
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY
+        )
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -171,7 +173,9 @@ def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY
+        )
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -212,7 +216,9 @@ def test_worker_heartbeat_rejects_non_owner(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY
+        )
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,
@@ -266,7 +272,9 @@ def test_worker_can_extend_lease(tmp_path, worker_registry_path):
 
     with session_factory() as session:
         intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
-        outcome = Outcome(intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY)
+        outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY
+        )
         work_item = WorkItem(
             outcome=outcome,
             sequence_index=0,

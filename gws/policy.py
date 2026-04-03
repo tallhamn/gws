@@ -34,11 +34,7 @@ class PolicyEngine:
         lanes: set[str] = set()
 
         for rule in self.data.get("path_triggers", []):
-            if any(
-                fnmatch(path, pattern)
-                for path in touched_paths
-                for pattern in rule["patterns"]
-            ):
+            if any(fnmatch(path, pattern) for path in touched_paths for pattern in rule["patterns"]):
                 lanes.add(rule["lane"])
 
         haystack = "\n".join(changed_hunks).lower()

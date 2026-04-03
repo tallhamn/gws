@@ -1,9 +1,23 @@
 import enum
+import weakref
 from datetime import datetime, timezone
 from typing import Optional
-import weakref
 
-from sqlalchemy import DateTime, Enum, ForeignKey, ForeignKeyConstraint, Index, Integer, JSON, String, Text, UniqueConstraint, event, inspect, text
+from sqlalchemy import (
+    JSON,
+    DateTime,
+    Enum,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    event,
+    inspect,
+    text,
+)
 from sqlalchemy.ext.mutable import Mutable, MutableDict, MutableList
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -324,7 +338,9 @@ class Outcome(Base):
     )
     planning_sessions: Mapped[list["PlanningSession"]] = relationship(back_populates="outcome")
     events: Mapped[list["OutcomeEvent"]] = relationship(back_populates="outcome")
-    current_work_item: Mapped[Optional["WorkItem"]] = relationship("WorkItem", foreign_keys=[current_work_item_id], post_update=True)
+    current_work_item: Mapped[Optional["WorkItem"]] = relationship(
+        "WorkItem", foreign_keys=[current_work_item_id], post_update=True
+    )
 
 
 class PlanningSession(Base):
@@ -334,7 +350,9 @@ class PlanningSession(Base):
     outcome_id: Mapped[int] = mapped_column(ForeignKey("outcomes.id"), index=True)
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
-    status: Mapped[PlanningSessionStatus] = mapped_column(_enum_column(PlanningSessionStatus), default=PlanningSessionStatus.PENDING)
+    status: Mapped[PlanningSessionStatus] = mapped_column(
+        _enum_column(PlanningSessionStatus), default=PlanningSessionStatus.PENDING
+    )
     planner_provider: Mapped[str] = mapped_column(String(64))
     planner_model: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     available_repos: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
@@ -497,9 +515,7 @@ class Lease(Base):
 
 class Attempt(Base):
     __tablename__ = "attempts"
-    __table_args__ = (
-        UniqueConstraint("lease_id", name="uq_attempts_lease_id"),
-    )
+    __table_args__ = (UniqueConstraint("lease_id", name="uq_attempts_lease_id"),)
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     work_item_id: Mapped[int] = mapped_column(ForeignKey("work_items.id"), index=True)

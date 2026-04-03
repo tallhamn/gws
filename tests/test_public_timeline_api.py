@@ -95,7 +95,8 @@ def _seed_outcome(
             result_status=attempt_status,
             artifact_refs=[],
             submitted_diff_ref="inline" if attempt_status is not AttemptResultStatus.PENDING else None,
-            created_at=(lease.issued_at if lease is not None else completed_at) or datetime.now(timezone.utc).replace(tzinfo=None),
+            created_at=(lease.issued_at if lease is not None else completed_at)
+            or datetime.now(timezone.utc).replace(tzinfo=None),
         )
         session.add(attempt)
         session.flush()
@@ -231,7 +232,10 @@ def test_public_timeline_brief_teaser_uses_first_readable_line(tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert data["intent"]["brief_summary"] == "Readable teaser line"
-    assert data["timeline_events"][0]["brief_text"] == "\n# Heading\n\n- bullet one\n  \nReadable teaser line\nAnother line"
+    assert (
+        data["timeline_events"][0]["brief_text"]
+        == "\n# Heading\n\n- bullet one\n  \nReadable teaser line\nAnother line"
+    )
     assert data["timeline_events"][0]["brief_teaser"] == "Readable teaser line"
 
 

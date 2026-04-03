@@ -13,12 +13,15 @@ def client():
 
 
 def test_create_intent(client):
-    resp = client.post("/intents", json={
-        "intent_id": "game-1",
-        "brief_text": "Build a side-scrolling platformer",
-        "context": "Browser game. HTML/CSS/JS.",
-        "planner_guidance": "Core loop first.",
-    })
+    resp = client.post(
+        "/intents",
+        json={
+            "intent_id": "game-1",
+            "brief_text": "Build a side-scrolling platformer",
+            "context": "Browser game. HTML/CSS/JS.",
+            "planner_guidance": "Core loop first.",
+        },
+    )
     assert resp.status_code == 201
     data = resp.json()
     assert data["intent_id"] == "game-1"
@@ -26,33 +29,45 @@ def test_create_intent(client):
 
 
 def test_create_intent_increments_version(client):
-    client.post("/intents", json={
-        "intent_id": "game-1",
-        "brief_text": "Build a platformer",
-    })
-    resp = client.post("/intents", json={
-        "intent_id": "game-1",
-        "brief_text": "Build a platformer with boss fights",
-    })
+    client.post(
+        "/intents",
+        json={
+            "intent_id": "game-1",
+            "brief_text": "Build a platformer",
+        },
+    )
+    resp = client.post(
+        "/intents",
+        json={
+            "intent_id": "game-1",
+            "brief_text": "Build a platformer with boss fights",
+        },
+    )
     assert resp.status_code == 201
     assert resp.json()["intent_version"] == 2
 
 
 def test_create_intent_minimal(client):
-    resp = client.post("/intents", json={
-        "intent_id": "game-2",
-        "brief_text": "Build something",
-    })
+    resp = client.post(
+        "/intents",
+        json={
+            "intent_id": "game-2",
+            "brief_text": "Build something",
+        },
+    )
     assert resp.status_code == 201
     assert resp.json()["intent_version"] == 1
 
 
 def test_get_intent(client):
-    client.post("/intents", json={
-        "intent_id": "game-1",
-        "brief_text": "Build a platformer",
-        "context": "Browser game.",
-    })
+    client.post(
+        "/intents",
+        json={
+            "intent_id": "game-1",
+            "brief_text": "Build a platformer",
+            "context": "Browser game.",
+        },
+    )
     resp = client.get("/intents/game-1")
     assert resp.status_code == 200
     data = resp.json()

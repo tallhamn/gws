@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from alembic import command
 from alembic.config import Config
 
+from alembic import command
 
 PRODUCTION_LIKE_PREDECESSOR_SCHEMA = """
 CREATE TABLE alembic_version (
@@ -59,7 +59,8 @@ CREATE TABLE cases (
     goal TEXT NOT NULL,
     status VARCHAR(32) NOT NULL,
     workflow_status VARCHAR(32) NOT NULL,
-    CONSTRAINT fk_cases_intent_versions FOREIGN KEY(intent_id, intent_version) REFERENCES intent_versions (intent_id, intent_version)
+    CONSTRAINT fk_cases_intent_versions FOREIGN KEY(intent_id, intent_version)
+        REFERENCES intent_versions (intent_id, intent_version)
 );
 CREATE INDEX ix_cases_intent_id ON cases (intent_id);
 

@@ -1,9 +1,9 @@
 from fastapi.testclient import TestClient
 
 from gws.api import create_app
-from gws.coordinator import PlanningCoordinator
 from gws.config import Settings
 from gws.control_plane import ControlPlaneService
+from gws.coordinator import PlanningCoordinator
 from gws.db import Base, make_session_factory
 from gws.models import (
     IntentVersion,

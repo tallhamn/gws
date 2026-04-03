@@ -22,7 +22,9 @@ from gws.models import (
 
 def _outcome_with_work_item(session, *, allowed_paths=None, forbidden_paths=None):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    outcome = Outcome(
+        intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY
+    )
     work_item = WorkItem(
         outcome=outcome,
         sequence_index=0,
@@ -223,7 +225,9 @@ def test_issue_lease_rejects_non_positive_ttl_and_second_active_lease(session):
 
 def test_heartbeat_rejects_non_positive_ttl_and_attempt_status_rejects_invalid_values(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    outcome = Outcome(
+        intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY
+    )
     work_item = WorkItem(
         outcome=outcome,
         sequence_index=0,
@@ -278,7 +282,9 @@ def test_heartbeat_rejects_non_positive_ttl_and_attempt_status_rejects_invalid_v
 
 
 def test_active_lease_index_declares_sqlite_and_postgres_partial_predicates():
-    active_work_item_index = next(index for index in Lease.__table__.indexes if index.name == "uq_leases_active_work_item_id")
+    active_work_item_index = next(
+        index for index in Lease.__table__.indexes if index.name == "uq_leases_active_work_item_id"
+    )
 
     sqlite_where = active_work_item_index.dialect_options["sqlite"].get("where")
     postgresql_where = active_work_item_index.dialect_options["postgresql"].get("where")
@@ -317,7 +323,9 @@ def test_apply_attempt_completion_appends_governance_work_items(session):
 
 def test_apply_attempt_completion_deduplicates_existing_review_work_item(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    outcome = Outcome(
+        intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY
+    )
     execute_work_item = WorkItem(
         outcome=outcome,
         sequence_index=0,
@@ -388,7 +396,9 @@ merge_requirements:
 
     session.refresh(work_item)
     verdicts = session.query(Verdict).all()
-    review_work_items = session.query(WorkItem).filter(WorkItem.outcome_id == outcome.id, WorkItem.work_type == "review").all()
+    review_work_items = (
+        session.query(WorkItem).filter(WorkItem.outcome_id == outcome.id, WorkItem.work_type == "review").all()
+    )
 
     assert work_item.status is WorkItemStatus.SUCCEEDED
     assert verdicts[0].result is VerdictResult.PASS

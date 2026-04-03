@@ -1,12 +1,10 @@
 from logging.config import fileConfig
 
-from alembic import context
-
-from gws.db import Base
-from gws.config import Settings
-
 # Ensure all models are imported so their tables are registered on Base.metadata.
 import gws.models  # noqa: F401
+from alembic import context
+from gws.config import Settings
+from gws.db import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -58,9 +56,7 @@ def run_migrations_online() -> None:
     connectable = make_engine(settings.database_url)
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()

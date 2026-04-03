@@ -45,11 +45,7 @@ def verify_attempt(
         normalized.append(clean)
     touched_paths = normalized
 
-    if any(
-        fnmatch(path, pattern)
-        for path in touched_paths
-        for pattern in forbidden_paths
-    ):
+    if any(fnmatch(path, pattern) for path in touched_paths for pattern in forbidden_paths):
         logger.info("Forbidden path detected in touched_paths")
         return SimpleNamespace(
             result="fail_and_replan",
@@ -58,8 +54,7 @@ def verify_attempt(
         )
 
     allowed = bool(allowed_paths) and all(
-        any(fnmatch(path, pattern) for pattern in allowed_paths)
-        for path in touched_paths
+        any(fnmatch(path, pattern) for pattern in allowed_paths) for path in touched_paths
     )
     if not allowed:
         return SimpleNamespace(
@@ -110,6 +105,7 @@ async def verify_artifacts(
             resp = await _gateway_call(requirement=req, repo=repo)
         else:
             import aiohttp
+
             async with aiohttp.ClientSession() as http_session:
                 async with http_session.post(
                     f"{gateway_url}/verify",

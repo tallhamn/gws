@@ -3,7 +3,15 @@ from typing import Optional
 import pytest
 
 from gws.coordinator import PlanningCoordinator
-from gws.models import IntentVersion, Outcome, OutcomeEvent, OutcomePhase, PlanningSession, PlanningSessionStatus, WorkItem
+from gws.models import (
+    IntentVersion,
+    Outcome,
+    OutcomeEvent,
+    OutcomePhase,
+    PlanningSession,
+    PlanningSessionStatus,
+    WorkItem,
+)
 
 
 class FakePlannerClient:
@@ -41,7 +49,13 @@ class FakePlannerClient:
 def test_coordinator_creates_outcome_planning_session_and_work_item(session):
     session.add_all(
         [
-            IntentVersion(intent_id="intent-1", intent_version=1, brief_text="old brief", context="old context", planner_guidance="old guidance"),
+            IntentVersion(
+                intent_id="intent-1",
+                intent_version=1,
+                brief_text="old brief",
+                context="old context",
+                planner_guidance="old guidance",
+            ),
             IntentVersion(
                 intent_id="intent-1",
                 intent_version=2,
@@ -186,7 +200,9 @@ def test_coordinator_records_failed_planning_session_and_event(session):
 
     stored_outcome = session.query(Outcome).one()
     stored_planning = session.query(PlanningSession).one()
-    stored_events = session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
+    stored_events = (
+        session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
+    )
 
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert session.query(WorkItem).count() == 0
@@ -241,7 +257,9 @@ def test_coordinator_rolls_back_failed_materialization_before_recording_failure(
 
     stored_outcome = session.query(Outcome).one()
     stored_planning = session.query(PlanningSession).one()
-    stored_events = session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
+    stored_events = (
+        session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
+    )
 
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None

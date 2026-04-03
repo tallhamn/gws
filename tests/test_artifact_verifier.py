@@ -1,6 +1,6 @@
 import pytest
 
-from gws.verifier import verify_artifacts, ArtifactVerdict
+from gws.verifier import verify_artifacts
 
 
 @pytest.mark.asyncio

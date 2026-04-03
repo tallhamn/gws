@@ -175,7 +175,9 @@ class ControlPlaneService:
             self.session.rollback()
             logger.warning("Work item %d lease issuance failed due to integrity error", work_item_id)
             raise ValueError(f"work item {work_item_id} already has an active lease") from exc
-        logger.info("Lease %d issued for work item %d to worker %s (ttl=%ds)", lease.id, work_item_id, worker_id, ttl_seconds)
+        logger.info(
+            "Lease %d issued for work item %d to worker %s (ttl=%ds)", lease.id, work_item_id, worker_id, ttl_seconds
+        )
         return lease
 
     def apply_attempt_completion(
@@ -201,7 +203,9 @@ class ControlPlaneService:
 
         if work_item.status in {WorkItemStatus.SUCCEEDED, WorkItemStatus.FAILED, WorkItemStatus.REVOKED}:
             if active_lease is None or active_lease.heartbeat_deadline <= now:
-                logger.warning("Work item %d already in terminal status %s, skipping", work_item_id, work_item.status.value)
+                logger.warning(
+                    "Work item %d already in terminal status %s, skipping", work_item_id, work_item.status.value
+                )
                 return
             if active_lease.worker_id != worker_id:
                 raise PermissionError("work item lease belongs to another worker")
@@ -308,11 +312,7 @@ class ControlPlaneService:
 
     def expire_leases(self, now_offset_seconds: int = 0) -> int:
         now = _utc_now() + timedelta(seconds=now_offset_seconds)
-        leases = (
-            self.session.query(Lease)
-            .filter(Lease.expired_at.is_(None), Lease.heartbeat_deadline <= now)
-            .all()
-        )
+        leases = self.session.query(Lease).filter(Lease.expired_at.is_(None), Lease.heartbeat_deadline <= now).all()
         for lease in leases:
             lease.expired_at = lease.heartbeat_deadline
             if lease.work_item.status is WorkItemStatus.LEASED:

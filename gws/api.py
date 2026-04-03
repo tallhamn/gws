@@ -5,7 +5,7 @@ from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 from sqlalchemy.exc import IntegrityError
 
 from .auth import WorkerIdentity, WorkerRegistry, build_worker_auth_dependency
@@ -15,13 +15,13 @@ from .contracts import (
     WorkerCompletionResponse,
     WorkerHeartbeatRequest,
     WorkerHeartbeatResponse,
-    WorkerLeaseRequest,
     WorkerLeaseExtensionRequest,
     WorkerLeaseExtensionResponse,
+    WorkerLeaseRequest,
     WorkerLeaseResponse,
 )
-from .coordinator import PlanningCoordinator
 from .control_plane import ControlPlaneService
+from .coordinator import PlanningCoordinator
 from .db import Base, make_session_factory
 from .models import Lease
 
@@ -57,7 +57,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
         @app.middleware("http")
         async def check_api_key(request: Request, call_next):
-            if request.url.path == "/healthz" or request.url.path.startswith("/public/") or request.url.path.startswith("/worker/"):
+            if (
+                request.url.path == "/healthz"
+                or request.url.path.startswith("/public/")
+                or request.url.path.startswith("/worker/")
+            ):
                 return await call_next(request)
 
             auth = request.headers.get("Authorization", "")
@@ -96,11 +100,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 .first()
             )
         else:
-            intent = (
-                session.query(IntentVersion)
-                .order_by(IntentVersion.created_at.desc())
-                .first()
-            )
+            intent = session.query(IntentVersion).order_by(IntentVersion.created_at.desc()).first()
         if intent is None:
             return None
 
@@ -163,9 +163,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
-                repo: head
-                for repo, head in payload.repo_heads.items()
-                if repo in worker.repo_access_set
+                repo: head for repo, head in payload.repo_heads.items() if repo in worker.repo_access_set
             }
 
             work_item = (
@@ -189,7 +187,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         eligible_repo_heads=eligible_repo_heads,
                     )
                 except PlanningUnavailableError as exc:
-                    raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Planning unavailable") from exc
+                    raise HTTPException(
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Planning unavailable"
+                    ) from exc
 
             if work_item is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No eligible work")

@@ -12,14 +12,20 @@ def test_synthesize_includes_lane_capabilities_in_prompt():
 
     mock_anthropic = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=json.dumps({
-        "title": "Build player movement",
-        "goal": "Implement WASD controls",
-        "repo": "studio-ystackai",
-        "allowed_paths": ["src/**"],
-        "forbidden_paths": [],
-        "work_type": "execute",
-    }))]
+    mock_response.content = [
+        MagicMock(
+            text=json.dumps(
+                {
+                    "title": "Build player movement",
+                    "goal": "Implement WASD controls",
+                    "repo": "studio-ystackai",
+                    "allowed_paths": ["src/**"],
+                    "forbidden_paths": [],
+                    "work_type": "execute",
+                }
+            )
+        )
+    ]
     mock_anthropic.messages.create.return_value = mock_response
     client.client = mock_anthropic
 
@@ -51,14 +57,20 @@ def test_synthesize_works_without_optional_context():
 
     mock_anthropic = MagicMock()
     mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=json.dumps({
-        "title": "Do thing",
-        "goal": "Goal",
-        "repo": "repo-a",
-        "allowed_paths": ["**"],
-        "forbidden_paths": [],
-        "work_type": "execute",
-    }))]
+    mock_response.content = [
+        MagicMock(
+            text=json.dumps(
+                {
+                    "title": "Do thing",
+                    "goal": "Goal",
+                    "repo": "repo-a",
+                    "allowed_paths": ["**"],
+                    "forbidden_paths": [],
+                    "work_type": "execute",
+                }
+            )
+        )
+    ]
     mock_anthropic.messages.create.return_value = mock_response
     client.client = mock_anthropic
 

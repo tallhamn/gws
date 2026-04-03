@@ -1,5 +1,5 @@
-from gws.config import Settings
 from gws.api import create_app
+from gws.config import Settings
 
 
 def test_create_app_has_health_route():

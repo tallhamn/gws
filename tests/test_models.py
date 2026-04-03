@@ -76,10 +76,21 @@ def test_legacy_case_and_step_runtime_models_are_gone():
 
 
 def test_lease_and_attempt_persist_with_required_work_item_target(session):
-    from gws.models import Attempt, AttemptResultStatus, IntentVersion, Lease, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+    from gws.models import (
+        Attempt,
+        AttemptResultStatus,
+        IntentVersion,
+        Lease,
+        Outcome,
+        OutcomePhase,
+        WorkItem,
+        WorkItemStatus,
+    )
 
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
-    outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY)
+    outcome = Outcome(
+        intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY
+    )
     work_item = WorkItem(
         outcome=outcome,
         sequence_index=0,
@@ -116,7 +127,9 @@ def test_lease_and_attempt_persist_with_required_work_item_target(session):
 
 
 def test_json_payload_mutations_persist_after_commit(session):
-    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music", accepted_amendments=[{"path": "a"}])
+    intent = IntentVersion(
+        intent_id="intent-1", intent_version=1, brief_text="ship /music", accepted_amendments=[{"path": "a"}]
+    )
     outcome = Outcome(intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music")
     planning = PlanningSession(
         outcome=outcome,
@@ -174,7 +187,9 @@ def test_fresh_instances_support_json_defaults_before_flush(session):
         planner_provider="claude_code",
         planner_model="claude-sonnet-4-20250514",
     )
-    work_item = WorkItem(outcome=outcome, sequence_index=0, repo="repo-a", lane="coder", work_type="execute", status=WorkItemStatus.READY)
+    work_item = WorkItem(
+        outcome=outcome, sequence_index=0, repo="repo-a", lane="coder", work_type="execute", status=WorkItemStatus.READY
+    )
 
     intent.accepted_amendments.append({"path": "a", "meta": {"owner": "alice"}})
     planning.available_repos.append("repo-a")
@@ -229,7 +244,6 @@ def test_nested_json_payload_mutations_persist_after_commit(session):
 
     assert reloaded_intent.accepted_amendments[0]["path"] == "b"
     assert reloaded_planning.planning_context["limits"]["max_runtime"] == 30
-
 
 
 def test_replaced_nested_list_items_stop_dirtying_old_parent(session):

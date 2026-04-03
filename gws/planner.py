@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
 import logging
+from datetime import datetime, timezone
 from typing import Optional
 
 from pydantic import ValidationError
@@ -61,8 +61,7 @@ class PlannerService:
             if planning_session is None:
                 raise ValueError(f"unknown planning_session_id: {planning_session_id}")
             raise ValueError(
-                "planning session already claimed: "
-                f"{planning_session_id} is {planning_session.status.value}"
+                f"planning session already claimed: {planning_session_id} is {planning_session.status.value}"
             )
 
         planning_session = self.session.get(PlanningSession, planning_session_id)

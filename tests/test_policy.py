@@ -40,18 +40,20 @@ def test_policy_engine_loads_default_policy_independent_of_cwd(monkeypatch, tmp_
 
 
 def test_lane_capabilities_parsed():
-    engine = PolicyEngine({
-        "lanes": {
-            "coder": {
-                "lease_ttl_seconds": 900,
-                "capabilities": "Write and modify game code.",
+    engine = PolicyEngine(
+        {
+            "lanes": {
+                "coder": {
+                    "lease_ttl_seconds": 900,
+                    "capabilities": "Write and modify game code.",
+                },
+                "artist": {
+                    "lease_ttl_seconds": 900,
+                    "capabilities": "Create visual assets.",
+                },
             },
-            "artist": {
-                "lease_ttl_seconds": 900,
-                "capabilities": "Create visual assets.",
-            },
-        },
-    })
+        }
+    )
     caps = engine.lane_capabilities()
     assert caps == {
         "coder": "Write and modify game code.",

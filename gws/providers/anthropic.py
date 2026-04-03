@@ -72,7 +72,7 @@ class AnthropicPlannerClient:
             except Exception as exc:
                 last_exc = exc
                 if attempt < 2:
-                    wait = 2 ** attempt
+                    wait = 2**attempt
                     logger.warning("Planner API attempt %d failed: %s. Retrying in %ds...", attempt + 1, exc, wait)
                     time.sleep(wait)
-        raise RuntimeError(f"Planner API failed after 3 attempts") from last_exc
+        raise RuntimeError("Planner API failed after 3 attempts") from last_exc

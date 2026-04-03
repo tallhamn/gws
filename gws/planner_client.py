@@ -18,8 +18,7 @@ class PlannerClient(Protocol):
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> SynthesizedPlan:
-        ...
+    ) -> SynthesizedPlan: ...
 
 
 def resolve_planner_provider(settings: Settings) -> str:
@@ -44,5 +43,7 @@ def build_planner_client(settings: Settings) -> PlannerClient:
     if provider == "anthropic":
         from .providers.anthropic import AnthropicPlannerClient
 
-        return AnthropicPlannerClient(api_key=settings.planner_api_key, model=settings.planner_model, timeout=settings.planner_timeout)
+        return AnthropicPlannerClient(
+            api_key=settings.planner_api_key, model=settings.planner_model, timeout=settings.planner_timeout
+        )
     raise ValueError(f"unsupported planner provider: {provider}")
