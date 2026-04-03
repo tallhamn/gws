@@ -523,13 +523,7 @@ class Attempt(Base):
     worker_id: Mapped[str] = mapped_column(String(128), index=True)
     repo: Mapped[str] = mapped_column(String(255), index=True)
     result_status: Mapped[AttemptResultStatus] = mapped_column(
-        Enum(
-            AttemptResultStatus,
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-            validate_strings=True,
-            native_enum=False,
-            create_constraint=True,
-        ),
+        _enum_column(AttemptResultStatus),
         default=AttemptResultStatus.PENDING,
     )
     artifact_refs: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
@@ -545,15 +539,7 @@ class Verdict(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     attempt_id: Mapped[int] = mapped_column(ForeignKey("attempts.id"), index=True)
-    result: Mapped[VerdictResult] = mapped_column(
-        Enum(
-            VerdictResult,
-            values_callable=lambda enum_cls: [member.value for member in enum_cls],
-            validate_strings=True,
-            native_enum=False,
-            create_constraint=True,
-        )
-    )
+    result: Mapped[VerdictResult] = mapped_column(_enum_column(VerdictResult))
     created_at: Mapped[datetime] = mapped_column(DateTime, default=_utc_now)
     attempt: Mapped[Attempt] = relationship(back_populates="verdicts")
 

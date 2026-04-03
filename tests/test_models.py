@@ -7,7 +7,10 @@ from sqlalchemy.pool import StaticPool
 
 from gws.db import make_engine
 from gws.models import (
+    Attempt,
+    AttemptResultStatus,
     IntentVersion,
+    Lease,
     Outcome,
     OutcomeEvent,
     OutcomePhase,
@@ -789,3 +792,37 @@ def test_make_engine_uses_static_pool_for_in_memory_sqlite():
         assert pool.submit(read_count).result() == 1
 
     assert isinstance(engine.pool, StaticPool)
+
+
+def test_attempt_result_status_rejects_invalid_values(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
+    outcome = Outcome(
+        intent_id="intent-1", intent_version=1, title="Create /music", goal="Implement /music", phase=OutcomePhase.READY
+    )
+    work_item = WorkItem(
+        outcome=outcome, sequence_index=0, repo="repo-a", lane="coder", work_type="execute", status=WorkItemStatus.READY
+    )
+    session.add_all([intent, outcome, work_item])
+    session.commit()
+
+    lease = Lease(
+        work_item_id=work_item.id,
+        worker_id="worker-1",
+        lane="coder",
+        heartbeat_deadline=work_item.created_at,
+        expires_at=work_item.created_at,
+    )
+    session.add(lease)
+    session.flush()
+
+    attempt = Attempt(
+        work_item_id=work_item.id,
+        lease_id=lease.id,
+        worker_id="worker-1",
+        repo="repo-a",
+        result_status="bogus",
+    )
+    session.add(attempt)
+
+    with pytest.raises(StatementError, match="not among the defined enum values"):
+        session.commit()
