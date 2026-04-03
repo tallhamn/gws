@@ -374,4 +374,24 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "planner_guidance": intent.planner_guidance,
             }
 
+    @app.post("/intents/{intent_id}/complete")
+    def complete_intent(intent_id: str) -> dict:
+        with session_factory() as session:
+            from .models import IntentStatus, IntentVersion
+
+            intent = (
+                session.query(IntentVersion)
+                .filter(IntentVersion.intent_id == intent_id)
+                .order_by(IntentVersion.intent_version.desc())
+                .first()
+            )
+            if intent is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
+            if intent.status is IntentStatus.SATISFIED:
+                return {"intent_id": intent_id, "intent_version": intent.intent_version, "status": "satisfied"}
+            intent.status = IntentStatus.SATISFIED
+            session.commit()
+            logger.info("Intent %s v%d manually marked satisfied", intent_id, intent.intent_version)
+            return {"intent_id": intent_id, "intent_version": intent.intent_version, "status": "satisfied"}
+
     return app
