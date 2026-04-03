@@ -1,6 +1,12 @@
 from __future__ import annotations
 
+import enum
+
 from pydantic import BaseModel, Field
+
+
+class PlannerResult(str, enum.Enum):
+    SATISFIED = "satisfied"
 
 
 class SynthesizedPlan(BaseModel):

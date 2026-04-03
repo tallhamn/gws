@@ -5,7 +5,7 @@ import logging
 import time
 from typing import Optional
 
-from gws.contracts import SynthesizedPlan
+from gws.contracts import PlannerResult, SynthesizedPlan
 from gws.providers.common import DEFAULT_CLAUDE_MODEL, build_system_prompt, parse_synthesized_plan_text
 
 try:
@@ -25,7 +25,7 @@ class AnthropicPlannerClient:
         self.timeout = timeout
 
     @staticmethod
-    def _parse_response(message) -> SynthesizedPlan:
+    def _parse_response(message) -> SynthesizedPlan | PlannerResult:
         if not getattr(message, "content", None):
             raise ValueError("planner response did not contain JSON text")
 
@@ -46,7 +46,7 @@ class AnthropicPlannerClient:
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> SynthesizedPlan:
+    ) -> SynthesizedPlan | PlannerResult:
         system_prompt = build_system_prompt(
             lane_capabilities=lane_capabilities,
             intent_context=intent_context,

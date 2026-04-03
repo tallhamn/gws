@@ -6,7 +6,7 @@ import shutil
 import subprocess
 from typing import Optional
 
-from gws.contracts import SynthesizedPlan
+from gws.contracts import PlannerResult, SynthesizedPlan
 from gws.providers.common import DEFAULT_CLAUDE_MODEL, build_system_prompt, parse_synthesized_plan_text
 
 logger = logging.getLogger(__name__)
@@ -40,7 +40,7 @@ class ClaudeCodePlannerClient:
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> SynthesizedPlan:
+    ) -> SynthesizedPlan | PlannerResult:
         if not self.is_available(self.command):
             raise RuntimeError(f"Claude Code command not found: {self.command}")
 

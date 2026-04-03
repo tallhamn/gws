@@ -209,6 +209,7 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
     assert result.model_dump() == {
         "title": "Build player movement",
         "goal": "Implement movement controls",
+        "description": "",
         "repo": "repo-a",
         "allowed_paths": ["src/**"],
         "forbidden_paths": [],
@@ -287,7 +288,7 @@ def test_planner_materializes_outcome_and_ready_work_item(session):
     stored_work_item = session.get(WorkItem, work_item.id)
 
     assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
-    assert stored_planning.plan_payload == planner_client.plan
+    assert stored_planning.plan_payload == {**planner_client.plan, "description": ""}
     assert stored_planning.completed_at is not None
 
     assert stored_outcome.title == "Create /music endpoint"
@@ -451,7 +452,7 @@ def test_planner_rejects_selected_repo_outside_planning_session_repos(session):
 
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED
-    assert stored_planning.plan_payload == planner.planner_client.plan
+    assert stored_planning.plan_payload == {**planner.planner_client.plan, "description": ""}
     assert stored_outcome.phase is OutcomePhase.PLANNING
     assert stored_outcome.current_work_item_id is None
 
@@ -576,3 +577,30 @@ def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(mo
         "-plain removed line",
         "+plain added line",
     ]
+
+
+def test_parse_synthesized_plan_text_returns_satisfied_for_satisfied_string():
+    from gws.contracts import PlannerResult
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text("SATISFIED")
+    assert result is PlannerResult.SATISFIED
+
+
+def test_parse_synthesized_plan_text_returns_satisfied_with_whitespace():
+    from gws.contracts import PlannerResult
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text("  SATISFIED  \n")
+    assert result is PlannerResult.SATISFIED
+
+
+def test_parse_synthesized_plan_text_returns_plan_for_json():
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text(
+        '{"title":"Build it","goal":"Make it work","repo":"repo-a",'
+        '"allowed_paths":["src/**"],"forbidden_paths":[],"work_type":"execute"}'
+    )
+    assert isinstance(result, SynthesizedPlan)
+    assert result.title == "Build it"

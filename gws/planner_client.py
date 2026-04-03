@@ -3,7 +3,7 @@ from __future__ import annotations
 from typing import Optional, Protocol
 
 from .config import Settings
-from .contracts import SynthesizedPlan
+from .contracts import PlannerResult, SynthesizedPlan
 from .providers.claude_code import ClaudeCodePlannerClient
 
 
@@ -18,7 +18,7 @@ class PlannerClient(Protocol):
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
-    ) -> SynthesizedPlan: ...
+    ) -> SynthesizedPlan | PlannerResult: ...
 
 
 def resolve_planner_provider(settings: Settings) -> str:
