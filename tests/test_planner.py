@@ -9,6 +9,7 @@ from gws.models import (
     IntentVersion,
     Outcome,
     OutcomePhase,
+    OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
     WorkItem,
@@ -577,6 +578,39 @@ def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(mo
         "-plain removed line",
         "+plain added line",
     ]
+
+
+def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
+    from gws.contracts import PlannerResult
+    from gws.models import IntentStatus
+
+    planning = _planning_session(session)
+    planner_client = FakePlannerClient(PlannerResult.SATISFIED)
+
+    planner = PlannerService(session, planner_client=planner_client)
+    result = planner.materialize_plan(planning.id)
+
+    assert result is PlannerResult.SATISFIED
+
+    session.expunge_all()
+    stored_planning = session.get(PlanningSession, planning.id)
+    intent = (
+        session.query(IntentVersion)
+        .filter(IntentVersion.intent_id == "intent-1")
+        .order_by(IntentVersion.intent_version.desc())
+        .first()
+    )
+
+    assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
+    assert stored_planning.completed_at is not None
+    assert stored_planning.plan_payload == {"result": "satisfied"}
+    assert intent.status is IntentStatus.SATISFIED
+    assert session.query(WorkItem).count() == 0
+
+    stored_outcome = session.get(Outcome, stored_planning.outcome_id)
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.ABANDONED
+    assert stored_outcome.result_summary == "Intent already satisfied"
 
 
 def test_parse_synthesized_plan_text_returns_satisfied_for_satisfied_string():

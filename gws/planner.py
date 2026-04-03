@@ -8,10 +8,13 @@ from pydantic import ValidationError
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from .contracts import SynthesizedPlan
+from .contracts import PlannerResult, SynthesizedPlan
 from .models import (
+    IntentStatus,
+    IntentVersion,
     Outcome,
     OutcomePhase,
+    OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
     WorkItem,
@@ -47,7 +50,7 @@ class PlannerService:
             logger.warning("Plan validation failed: %s", str(exc))
             raise ValueError(f"synthesized plan invalid: {exc}") from exc
 
-    def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem]:
+    def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem] | PlannerResult:
         claim_result = self.session.execute(
             update(PlanningSession)
             .where(
@@ -70,17 +73,39 @@ class PlannerService:
 
         try:
             context = planning_session.planning_context or {}
-            plan = self._validate_plan(
-                self.planner_client.synthesize(
-                    brief=str(context.get("brief", "")),
-                    lane=planning_session.lane,
-                    repo_heads=dict(planning_session.repo_heads),
-                    envelope=dict(context.get("envelope", {})),
-                    lane_capabilities=self.lane_capabilities,
-                    intent_context=context.get("intent_context") or None,
-                    planner_guidance=context.get("planner_guidance") or None,
-                )
+            raw_result = self.planner_client.synthesize(
+                brief=str(context.get("brief", "")),
+                lane=planning_session.lane,
+                repo_heads=dict(planning_session.repo_heads),
+                envelope=dict(context.get("envelope", {})),
+                lane_capabilities=self.lane_capabilities,
+                intent_context=context.get("intent_context") or None,
+                planner_guidance=context.get("planner_guidance") or None,
             )
+
+            if isinstance(raw_result, PlannerResult):
+                planning_session.status = PlanningSessionStatus.SUCCEEDED
+                planning_session.plan_payload = {"result": raw_result.value}
+                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+                intent = (
+                    self.session.query(IntentVersion)
+                    .filter(
+                        IntentVersion.intent_id == planning_session.outcome.intent_id,
+                        IntentVersion.intent_version == planning_session.outcome.intent_version,
+                    )
+                    .one()
+                )
+                intent.status = IntentStatus.SATISFIED
+
+                planning_session.outcome.phase = OutcomePhase.COMPLETED
+                planning_session.outcome.result = OutcomeResult.ABANDONED
+                planning_session.outcome.result_summary = "Intent already satisfied"
+                planning_session.outcome.completed_at = planning_session.completed_at
+                self.session.flush()
+                return raw_result
+
+            plan = self._validate_plan(raw_result)
 
             planning_session.plan_payload = plan.model_dump()
 
