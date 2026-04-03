@@ -30,6 +30,8 @@ def make_engine(database_url: str, *, pool_size: int = 10, pool_timeout: int = 3
             del connection_record
             cursor = dbapi_connection.cursor()
             cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.execute("PRAGMA journal_mode=WAL")
+            cursor.execute("PRAGMA busy_timeout=5000")
             cursor.close()
 
     return engine
