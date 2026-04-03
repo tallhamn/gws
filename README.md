@@ -15,6 +15,44 @@ At the macro level, GWS does pathfinding: choose the next outcome toward the goa
 - Not just a coding agent loop with better prompting.
 - Not a general-purpose workflow engine; execution stays constrained and governance stays explicit.
 
+## Architecture
+
+```
+                        ┌──────────────────┐
+                        │  IntentVersion   │  Immutable, versioned desired end state
+                        └────────┬─────────┘
+                                 │ 1:N
+                        ┌────────▼─────────┐
+                ┌───────┤     Outcome      ├───────┐
+                │       │                  │       │
+                │       └────────┬─────────┘       │
+                │ 1:N            │ 1:N             │ 1:N (append-only)
+     ┌──────────▼──┐    ┌───────▼────────┐   ┌────▼──────────┐
+     │  Planning   │    │   WorkItem     │   │ OutcomeEvent  │
+     │  Session    │    │                │   │               │
+     └─────────────┘    └───────┬────────┘   └───────────────┘
+          audit                 │ worker pulls
+                        ┌───────▼────────┐
+                        │     Lease      │  Time-bounded claim
+                        └───────┬────────┘
+                                │ worker submits
+                        ┌───────▼────────┐
+                        │    Attempt     │  Result + diff ref
+                        └───────┬────────┘
+                                │ governance evaluates
+                        ┌───────▼────────┐
+                        │    Verdict     │  pass / fail / append review
+                        └───────┬────────┘
+                                │
+                ┌───────────────┼───────────────┐
+                ▼               ▼               ▼
+             pass:         fail_and_replan:   append_governance_step:
+          outcome done     outcome failed     new review WorkItem
+                                              appended to outcome
+```
+
+**Execution cycle:** A worker requests work → GWS either finds a ready WorkItem or JIT-plans a new Outcome → issues a Lease → worker executes and submits an Attempt → governance produces a Verdict → the Verdict determines whether the outcome completes, fails, or grows a review step.
+
 ## Core Concepts
 
 ### Intent
@@ -132,6 +170,7 @@ Pull the next available work item for this worker's lane and repos. If no `ready
   "repo": "my-repo",
   "title": "Outcome title",
   "goal": "What the outcome should achieve",
+  "description": "Per-item context for the worker",
   "work_type": "implement",
   "allowed_paths": ["src/**"],
   "forbidden_paths": [],
