@@ -842,3 +842,54 @@ def test_amendment_proposal_status_rejects_invalid_values(session):
 
     with pytest.raises(StatementError, match="not among the defined enum values"):
         session.commit()
+
+
+def test_work_item_description_persists(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+        description="Implement the /music endpoint with playlist support",
+    )
+    session.add_all([intent, outcome, work_item])
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(WorkItem, work_item.id)
+    assert stored.description == "Implement the /music endpoint with playlist support"
+
+
+def test_work_item_description_defaults_empty(session):
+    intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="Ship /music")
+    outcome = Outcome(
+        intent_id="intent-1",
+        intent_version=1,
+        title="Create /music",
+        goal="Implement /music",
+        phase=OutcomePhase.READY,
+    )
+    work_item = WorkItem(
+        outcome=outcome,
+        sequence_index=0,
+        repo="repo-a",
+        lane="coder",
+        work_type="execute",
+        status=WorkItemStatus.READY,
+    )
+    session.add_all([intent, outcome, work_item])
+    session.commit()
+    session.expunge_all()
+
+    stored = session.get(WorkItem, work_item.id)
+    assert stored.description == ""

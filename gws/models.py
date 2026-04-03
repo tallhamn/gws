@@ -389,6 +389,7 @@ class WorkItem(Base):
     repo: Mapped[str] = mapped_column(String(255), index=True)
     lane: Mapped[str] = mapped_column(String(64), index=True)
     work_type: Mapped[str] = mapped_column(String(64))
+    description: Mapped[str] = mapped_column(Text, default="")
     status: Mapped[WorkItemStatus] = mapped_column(_enum_column(WorkItemStatus), default=WorkItemStatus.READY)
     allowed_paths: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)
     forbidden_paths: Mapped[list[str]] = mapped_column(DeepMutableList.as_mutable(JSON), default=list)

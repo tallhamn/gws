@@ -424,3 +424,27 @@ def test_apply_attempt_completion_rejects_non_owner_worker_without_mutating_leas
 
     assert work_item.status is WorkItemStatus.LEASED
     assert verdicts == []
+
+
+def test_governance_work_items_get_descriptive_context(session):
+    outcome, work_item = _outcome_with_work_item(session, allowed_paths=["auth/**"])
+
+    service = ControlPlaneService(session)
+    service.issue_lease(work_item_id=work_item.id, worker_id="worker-1", ttl_seconds=60)
+
+    service.apply_attempt_completion(
+        work_item_id=work_item.id,
+        worker_id="worker-1",
+        touched_paths=["auth/session.py"],
+        changed_hunks=["-issuer = 'internal'", "+issuer = 'https://sso.example.com'"],
+    )
+
+    review_items = (
+        session.query(WorkItem)
+        .filter(WorkItem.outcome_id == outcome.id, WorkItem.work_type == "review")
+        .all()
+    )
+
+    assert len(review_items) == 1
+    assert "security-review" in review_items[0].description
+    assert str(work_item.id) in review_items[0].description

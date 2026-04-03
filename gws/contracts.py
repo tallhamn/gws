@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 class SynthesizedPlan(BaseModel):
     title: str
     goal: str
+    description: str = ""
     repo: str
     allowed_paths: list[str] = Field(default_factory=list)
     forbidden_paths: list[str] = Field(default_factory=list)
@@ -24,6 +25,7 @@ class WorkerLeaseResponse(BaseModel):
     repo: str
     title: str
     goal: str
+    description: str
     work_type: str
     allowed_paths: list[str]
     forbidden_paths: list[str]

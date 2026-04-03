@@ -218,6 +218,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 work_item_id=work_item.id,
                 title=work_item.outcome.title,
                 goal=work_item.outcome.goal,
+                description=work_item.description,
                 repo=work_item.repo,
                 work_type=work_item.work_type,
                 allowed_paths=list(work_item.allowed_paths),
