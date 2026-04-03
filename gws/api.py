@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -80,6 +81,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def _control_plane(session) -> ControlPlaneService:
         return ControlPlaneService(session, policy_path=settings.policy_path)
 
+    _planning_lock = threading.Lock()
+
     def _jit_plan_work_item(
         *,
         session,
@@ -104,6 +107,11 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if intent is None:
             return None
 
+        # Only one worker plans at a time; others get None (no work) instead of queueing
+        if not _planning_lock.acquire(blocking=False):
+            logger.info("JIT planning already in progress, skipping for lane %s", worker.lane)
+            return None
+
         try:
             planner_client = build_planner_client(settings)
             policy = PolicyEngine.from_file(settings.policy_path)
@@ -126,6 +134,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         except Exception as exc:
             logger.exception("JIT planning failed for lane %s", worker.lane)
             raise PlanningUnavailableError("Planning unavailable") from exc
+        finally:
+            _planning_lock.release()
 
     async def _complete_work_item_for_worker(
         *,
