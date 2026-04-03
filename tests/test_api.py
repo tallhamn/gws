@@ -109,6 +109,63 @@ def test_worker_lease_issues_lease_for_ready_work_item(tmp_path, worker_registry
     assert "work_item_id" in data
 
 
+def test_worker_lease_scopes_ready_work_to_requested_repo_and_intent(tmp_path, worker_registry_path):
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+
+    database_path = tmp_path / "api.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        first_intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="first brief")
+        second_intent = IntentVersion(intent_id="intent-2", intent_version=1, brief_text="second brief")
+        first_outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="First Outcome", goal="First Goal", phase=OutcomePhase.READY
+        )
+        second_outcome = Outcome(
+            intent_id="intent-2", intent_version=1, title="Second Outcome", goal="Second Goal", phase=OutcomePhase.READY
+        )
+        first_work_item = WorkItem(
+            outcome=first_outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            description="repo-a work",
+            status=WorkItemStatus.READY,
+        )
+        second_work_item = WorkItem(
+            outcome=second_outcome,
+            sequence_index=0,
+            repo="repo-b",
+            lane="coder",
+            work_type="execute",
+            description="repo-b work",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([first_intent, second_intent, first_outcome, second_outcome, first_work_item, second_work_item])
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/worker/lease",
+        json={"ttl_seconds": 60, "intent_id": "intent-2", "repo_heads": {"repo-b": "abc123"}},
+        headers=auth_headers("token-coder-1"),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["work_item_id"] == second_work_item.id
+    assert data["repo"] == "repo-b"
+    assert data["title"] == "Second Outcome"
+
+
 def test_worker_lease_returns_404_when_no_ready_work_items(tmp_path, worker_registry_path):
     database_path = tmp_path / "api.db"
     settings = Settings(

@@ -177,23 +177,27 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         worker: WorkerIdentity = Depends(require_worker),
     ) -> WorkerLeaseResponse:
         with session_factory() as session:
-            from .models import WorkItem, WorkItemStatus
+            from .models import Outcome, WorkItem, WorkItemStatus
 
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
                 repo: head for repo, head in payload.repo_heads.items() if repo in worker.repo_access_set
             }
+            eligible_repos = list(eligible_repo_heads) if eligible_repo_heads else accessible_repos
 
-            work_item = (
+            work_item_query = (
                 session.query(WorkItem)
+                .join(Outcome, WorkItem.outcome_id == Outcome.id)
                 .filter(
                     WorkItem.lane == worker.lane,
                     WorkItem.status == WorkItemStatus.READY,
-                    WorkItem.repo.in_(accessible_repos),
+                    WorkItem.repo.in_(eligible_repos),
                 )
-                .order_by(WorkItem.id)
-                .first()
             )
+            if payload.intent_id:
+                work_item_query = work_item_query.filter(Outcome.intent_id == payload.intent_id)
+
+            work_item = work_item_query.order_by(WorkItem.id).first()
 
             if work_item is None and eligible_repo_heads:
                 try:
