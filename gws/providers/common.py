@@ -33,9 +33,21 @@ def build_system_prompt(
     return "\n\n".join(parts)
 
 
+def _strip_code_fences(text: str) -> str:
+    """Strip markdown code fences (```json ... ```) if present."""
+    stripped = text.strip()
+    if stripped.startswith("```"):
+        # Remove opening fence line
+        first_newline = stripped.index("\n")
+        stripped = stripped[first_newline + 1:]
+    if stripped.endswith("```"):
+        stripped = stripped[:-3]
+    return stripped.strip()
+
+
 def parse_synthesized_plan_text(text: str) -> SynthesizedPlan:
     try:
-        parsed = json.loads(text)
+        parsed = json.loads(_strip_code_fences(text))
     except json.JSONDecodeError as exc:
         raise ValueError("planner response was not valid JSON") from exc
 
