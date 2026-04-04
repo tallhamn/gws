@@ -118,7 +118,7 @@ def build_public_timeline(session: Session, intent_id: str) -> dict[str, Any] | 
             selectinload(Outcome.work_items).selectinload(WorkItem.leases),
             selectinload(Outcome.work_items).selectinload(WorkItem.attempts),
         )
-        .filter(Outcome.intent_id == intent.intent_id, Outcome.intent_version == intent.intent_version)
+        .filter(Outcome.intent_id == intent.intent_id)
         .order_by(Outcome.created_at, Outcome.id)
         .all()
     )

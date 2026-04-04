@@ -498,3 +498,78 @@ def test_public_timeline_omits_queued_follow_on_work_items(tmp_path):
     assert response.status_code == 200
     data = response.json()
     assert [event["outcome"] for event in data["timeline_events"]] == ["succeeded"]
+
+
+def test_public_timeline_aggregates_outcomes_across_intent_versions(tmp_path):
+    database_path = tmp_path / "timeline-multi-version.db"
+    settings = Settings(database_url=f"sqlite+pysqlite:///{database_path}")
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    with session_factory() as session:
+        session.add_all(
+            [
+                IntentVersion(
+                    intent_id="intent-break-dashboard",
+                    intent_version=1,
+                    brief_text="Old brief that already produced work",
+                    created_at=now - timedelta(hours=1),
+                ),
+                IntentVersion(
+                    intent_id="intent-break-dashboard",
+                    intent_version=2,
+                    brief_text="Canonical brief after lock repair",
+                    created_at=now,
+                ),
+            ]
+        )
+        _seed_outcome(
+            session,
+            intent_id="intent-break-dashboard",
+            intent_version=1,
+            title="Implement dashboard shell",
+            goal="Build the crash dashboard shell",
+            phase=OutcomePhase.COMPLETED,
+            result=OutcomeResult.SUCCEEDED,
+            result_summary="Dashboard shell shipped",
+            completed_at=now - timedelta(minutes=10),
+            worker_id="coder1",
+            work_status=WorkItemStatus.SUCCEEDED,
+            lease_window=(now - timedelta(minutes=20), now - timedelta(minutes=11), now - timedelta(minutes=11)),
+            attempt_status=AttemptResultStatus.ACCEPTED,
+            verdict_result=VerdictResult.PASS,
+        )
+        _seed_outcome(
+            session,
+            intent_id="intent-break-dashboard",
+            intent_version=2,
+            title="Implement void audio",
+            goal="Build escalating audio into silence",
+            phase=OutcomePhase.RUNNING,
+            worker_id="musician",
+            lane="musician",
+            work_status=WorkItemStatus.LEASED,
+            lease_window=(now - timedelta(minutes=2), now + timedelta(minutes=8), None),
+            attempt_status=AttemptResultStatus.PENDING,
+        )
+        session.commit()
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.get("/public/intents/intent-break-dashboard/timeline")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["intent"]["intent_version"] == 2
+    assert data["timeline_events"][0]["brief_text"] == "Canonical brief after lock repair"
+    assert data["outcome_progress"] == {
+        "total_outcomes": 2,
+        "completed_outcomes": 1,
+        "active_outcomes": 1,
+    }
+    assert [event["outcome"] for event in data["timeline_events"][1:]] == ["succeeded", "live"]
+    assert data["timeline_events"][1]["title"] == "Implement dashboard shell"
+    assert data["timeline_events"][2]["title"] == "Implement void audio"
+    assert data["now_building"]["title"] == "Implement void audio"
