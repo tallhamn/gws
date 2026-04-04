@@ -8,6 +8,7 @@ from gws.models import (
     Outcome,
     OutcomeEvent,
     OutcomePhase,
+    OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
     WorkItem,
@@ -266,7 +267,10 @@ def test_coordinator_records_failed_planning_session_and_event(session):
         session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
     )
 
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert "repo repo-b is not in planning session available repos" in stored_outcome.result_summary
+    assert stored_outcome.completed_at is not None
     assert session.query(WorkItem).count() == 0
 
     assert stored_planning.status is PlanningSessionStatus.FAILED
@@ -323,7 +327,10 @@ def test_coordinator_rolls_back_failed_materialization_before_recording_failure(
         session.query(OutcomeEvent).filter_by(outcome_id=stored_outcome.id).order_by(OutcomeEvent.id.asc()).all()
     )
 
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert stored_outcome.result_summary == "flush boom"
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED

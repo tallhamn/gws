@@ -11,6 +11,7 @@ from .models import (
     Outcome,
     OutcomeEvent,
     OutcomePhase,
+    OutcomeResult,
     PlanningSession,
     PlanningSessionStatus,
     WorkItem,
@@ -127,6 +128,7 @@ class PlanningCoordinator:
                 "envelope": envelope,
                 "intent_context": intent.context,
                 "planner_guidance": intent.planner_guidance,
+                "target_branch": intent.target_branch,
             },
         )
         self.session.add_all([outcome, planning_session])
@@ -188,11 +190,17 @@ class PlanningCoordinator:
                 self.session.rollback()
                 planning_session = self.session.get(PlanningSession, planning_session_id)
                 if planning_session is not None:
+                    failed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     planning_session.status = PlanningSessionStatus.FAILED
                     if failure_plan_payload:
                         planning_session.plan_payload = failure_plan_payload
                     planning_session.error_detail = str(exc)
-                    planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    planning_session.completed_at = failed_at
+                    planning_session.outcome.phase = OutcomePhase.COMPLETED
+                    planning_session.outcome.result = OutcomeResult.FAILED
+                    planning_session.outcome.result_summary = str(exc)
+                    planning_session.outcome.completed_at = failed_at
+                    planning_session.outcome.current_work_item_id = None
                     self.session.add(
                         OutcomeEvent(
                             outcome=planning_session.outcome,

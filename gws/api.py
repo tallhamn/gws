@@ -34,6 +34,7 @@ class IntentCreate(BaseModel):
     brief_text: str
     context: str = ""
     planner_guidance: str = ""
+    target_branch: str | None = None
 
 
 class PlanningUnavailableError(RuntimeError):
@@ -179,6 +180,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_factory() as session:
             from .models import Outcome, WorkItem, WorkItemStatus
 
+            _control_plane(session).expire_leases()
+
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
                 repo: head for repo, head in payload.repo_heads.items() if repo in worker.repo_access_set
@@ -236,6 +239,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 allowed_paths=list(work_item.allowed_paths),
                 forbidden_paths=list(work_item.forbidden_paths),
                 base_commit=work_item.base_commit,
+                target_branch=work_item.target_branch,
                 artifact_requirements=list(work_item.artifact_requirements),
                 heartbeat_deadline=lease.heartbeat_deadline.isoformat(),
             )
@@ -320,6 +324,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         from .public_timeline import build_public_timeline
 
         with session_factory() as session:
+            _control_plane(session).expire_leases()
             payload = build_public_timeline(session, intent_id)
             if payload is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Intent not found")
@@ -344,6 +349,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 brief_text=payload.brief_text,
                 context=payload.context,
                 planner_guidance=payload.planner_guidance,
+                target_branch=payload.target_branch,
             )
             session.add(intent)
             try:
@@ -376,6 +382,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "brief_text": intent.brief_text,
                 "context": intent.context,
                 "planner_guidance": intent.planner_guidance,
+                "target_branch": intent.target_branch,
             }
 
     @app.post("/intents/{intent_id}/complete")

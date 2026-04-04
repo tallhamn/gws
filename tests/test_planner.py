@@ -454,7 +454,10 @@ def test_planner_rejects_selected_repo_outside_planning_session_repos(session):
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {**planner.planner_client.plan, "description": ""}
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert stored_outcome.result_summary == "repo repo-b is not in planning session available repos"
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
 
 
@@ -488,7 +491,10 @@ def test_planner_rejects_malformed_plan_without_mutating_state(session):
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert "work_type" in stored_outcome.result_summary
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
 
 
@@ -511,7 +517,10 @@ def test_planner_rejects_non_mapping_plan_without_mutating_state(session):
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert "valid dictionary" in stored_outcome.result_summary
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
 
 
@@ -546,7 +555,10 @@ def test_planner_rejects_wrong_plan_value_types_without_mutating_state(session):
     assert session.query(WorkItem).count() == 0
     assert stored_planning.status is PlanningSessionStatus.FAILED
     assert stored_planning.plan_payload == {}
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.FAILED
+    assert "allowed_paths" in stored_outcome.result_summary
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
 
 
@@ -696,7 +708,10 @@ def test_planner_skips_duplicate_active_outcome_for_same_intent_and_repo(session
     assert stored_planning.plan_payload["result"] == "duplicate"
     assert stored_planning.plan_payload["duplicate_outcome_id"] == existing.id
     assert session.query(WorkItem).count() == 1
-    assert stored_outcome.phase is OutcomePhase.PLANNING
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.ABANDONED
+    assert stored_outcome.result_summary == f"Duplicate of outcome {existing.id}"
+    assert stored_outcome.completed_at is not None
     assert stored_outcome.current_work_item_id is None
 
 
@@ -746,7 +761,17 @@ def test_planner_skips_duplicate_of_succeeded_outcome_for_same_intent_and_repo(s
     result = planner.materialize_plan(planning.id)
 
     assert result is PlannerResult.DUPLICATE
+    session.expunge_all()
+    stored_planning = session.get(PlanningSession, planning.id)
+    stored_outcome = session.get(Outcome, planning.outcome_id)
+
     assert session.query(WorkItem).count() == 1
+    assert stored_planning.plan_payload["result"] == "duplicate"
+    assert stored_planning.plan_payload["duplicate_outcome_id"] == existing.id
+    assert stored_outcome.phase is OutcomePhase.COMPLETED
+    assert stored_outcome.result is OutcomeResult.ABANDONED
+    assert stored_outcome.result_summary == f"Duplicate of outcome {existing.id}"
+    assert stored_outcome.completed_at is not None
 
 
 def test_coordinator_returns_none_when_planner_is_satisfied(session):

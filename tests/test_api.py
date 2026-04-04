@@ -3,6 +3,7 @@ from fastapi.testclient import TestClient
 from gws.api import create_app
 from gws.config import Settings
 from gws.db import Base, make_engine, make_session_factory
+from gws.models import Lease
 
 
 def auth_headers(token: str) -> dict[str, str]:
@@ -185,6 +186,70 @@ def test_worker_lease_returns_404_when_no_ready_work_items(tmp_path, worker_regi
     )
 
     assert response.status_code == 404
+
+
+def test_worker_lease_reclaims_expired_leases_before_searching_for_work(tmp_path, worker_registry_path):
+    from datetime import datetime, timedelta, timezone
+
+    from gws.control_plane import ControlPlaneService
+    from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus
+
+    database_path = tmp_path / "api.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief")
+        outcome = Outcome(
+            intent_id="intent-1", intent_version=1, title="Outcome", goal="Goal", phase=OutcomePhase.READY
+        )
+        work_item = WorkItem(
+            outcome=outcome,
+            sequence_index=0,
+            repo="repo-a",
+            lane="coder",
+            work_type="execute",
+            status=WorkItemStatus.READY,
+        )
+        session.add_all([intent, outcome, work_item])
+        session.commit()
+
+        original_lease = ControlPlaneService(session).issue_lease(
+            work_item_id=work_item.id,
+            worker_id="coder-1",
+            ttl_seconds=60,
+        )
+        expired_deadline = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=5)
+        original_lease.heartbeat_deadline = expired_deadline
+        original_lease.expires_at = expired_deadline
+        original_lease.expired_at = None
+        session.add(original_lease)
+        session.commit()
+        original_lease_id = original_lease.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/worker/lease",
+        json={"ttl_seconds": 60},
+        headers=auth_headers("token-coder-1"),
+    )
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["work_item_id"] == work_item.id
+    assert data["lease_id"] != original_lease_id
+
+    with session_factory() as session:
+        expired_lease = session.get(Lease, original_lease_id)
+        refreshed_work_item = session.get(WorkItem, work_item.id)
+        assert expired_lease.expired_at == expired_deadline
+        assert refreshed_work_item.status is WorkItemStatus.LEASED
 
 
 def test_worker_lease_returns_503_when_jit_planning_is_unavailable(tmp_path, worker_registry_path):

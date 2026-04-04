@@ -8,3 +8,6 @@ __pycache__/
 .wrangler/
 .worktrees/
 src/gws.egg-info/
+docs/superpowers/
+.coverage
+coverage.xml

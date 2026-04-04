@@ -37,6 +37,7 @@ class WorkerLeaseResponse(BaseModel):
     allowed_paths: list[str]
     forbidden_paths: list[str]
     base_commit: str | None = None
+    target_branch: str | None = None
     artifact_requirements: list[str] = Field(default_factory=list)
     heartbeat_deadline: str
 

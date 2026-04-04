@@ -52,6 +52,14 @@ class PlannerService:
             raise ValueError(f"synthesized plan invalid: {exc}") from exc
 
     @staticmethod
+    def _mark_outcome_failed(outcome: Outcome, message: str, *, completed_at: datetime) -> None:
+        outcome.phase = OutcomePhase.COMPLETED
+        outcome.result = OutcomeResult.FAILED
+        outcome.result_summary = str(message)
+        outcome.completed_at = completed_at
+        outcome.current_work_item_id = None
+
+    @staticmethod
     def _normalize_selected_repo(selected_repo: str, repo_heads: dict[str, str]) -> str:
         repo = str(selected_repo or "").strip()
         if repo in repo_heads or not repo or len(repo_heads) != 1:
@@ -186,23 +194,30 @@ class PlannerService:
                 plan=plan,
             )
             if duplicate_outcome is not None:
+                duplicate_completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 planning_session.status = PlanningSessionStatus.SUCCEEDED
                 planning_session.error_detail = ""
-                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                planning_session.completed_at = duplicate_completed_at
                 planning_session.plan_payload = {
                     **planning_session.plan_payload,
                     "result": PlannerResult.DUPLICATE.value,
                     "duplicate_outcome_id": duplicate_outcome.id,
                 }
+                planning_session.outcome.phase = OutcomePhase.COMPLETED
+                planning_session.outcome.result = OutcomeResult.ABANDONED
+                planning_session.outcome.result_summary = f"Duplicate of outcome {duplicate_outcome.id}"
+                planning_session.outcome.completed_at = duplicate_completed_at
                 self.session.flush()
                 return PlannerResult.DUPLICATE
         except Exception as exc:
             if self.session.is_active:
+                failed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 planning_session.status = PlanningSessionStatus.FAILED
                 if isinstance(exc, MaterializePlanError) and exc.plan_payload:
                     planning_session.plan_payload = dict(exc.plan_payload)
                 planning_session.error_detail = str(exc)
-                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                planning_session.completed_at = failed_at
+                self._mark_outcome_failed(planning_session.outcome, str(exc), completed_at=failed_at)
                 self.session.flush()
             raise
 
@@ -224,6 +239,7 @@ class PlannerService:
             allowed_paths=plan.allowed_paths,
             forbidden_paths=plan.forbidden_paths,
             base_commit=planning_session.repo_heads[selected_repo],
+            target_branch=context.get("target_branch"),
         )
         planning_session.status = PlanningSessionStatus.SUCCEEDED
         planning_session.error_detail = ""
