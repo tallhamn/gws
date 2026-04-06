@@ -152,16 +152,33 @@ class PlannerService:
             )
 
             if isinstance(raw_result, PlannerResult):
-                planning_session.status = PlanningSessionStatus.SUCCEEDED
-                planning_session.plan_payload = {"result": raw_result.value}
-                planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                # Guard: never accept SATISFIED when repo has no built files.
                 if raw_result is PlannerResult.SATISFIED:
-                    planning_session.outcome.phase = OutcomePhase.COMPLETED
-                    planning_session.outcome.result = OutcomeResult.ABANDONED
-                    planning_session.outcome.result_summary = "Intent already satisfied"
-                    planning_session.outcome.completed_at = planning_session.completed_at
-                self.session.flush()
-                return raw_result
+                    all_files = [f for files in repo_trees.values() for f in files]
+                    if not all_files:
+                        logger.warning(
+                            "Planner returned SATISFIED but repo_trees is empty — "
+                            "overriding to force re-plan (session %d)", planning_session_id,
+                        )
+                        raw_result = None  # fall through to re-raise as planning error
+
+                if isinstance(raw_result, PlannerResult):
+                    planning_session.status = PlanningSessionStatus.SUCCEEDED
+                    planning_session.plan_payload = {"result": raw_result.value}
+                    planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    if raw_result is PlannerResult.SATISFIED:
+                        planning_session.outcome.phase = OutcomePhase.COMPLETED
+                        planning_session.outcome.result = OutcomeResult.ABANDONED
+                        planning_session.outcome.result_summary = "Intent already satisfied"
+                        planning_session.outcome.completed_at = planning_session.completed_at
+                    self.session.flush()
+                    return raw_result
+
+            if raw_result is None:
+                raise MaterializePlanError(
+                    "Planner returned SATISFIED for empty repo — cannot accept",
+                    plan_payload={"result": "rejected_empty_satisfied"},
+                )
 
             plan = self._validate_plan(raw_result)
 
