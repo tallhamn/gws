@@ -159,7 +159,9 @@ class PlannerService:
             )
             logger.info(
                 "Evaluation for repo %s: satisfied=%s, examined %d files",
-                repo, result.satisfied, len(result.files_examined),
+                repo,
+                result.satisfied,
+                len(result.files_examined),
             )
             return result
         except Exception:
@@ -244,7 +246,8 @@ class PlannerService:
                     if not all_files:
                         logger.warning(
                             "Planner returned SATISFIED but repo_trees is empty — "
-                            "overriding to force re-plan (session %d)", planning_session_id,
+                            "overriding to force re-plan (session %d)",
+                            planning_session_id,
                         )
                         raw_result = None  # fall through to re-raise as planning error
 

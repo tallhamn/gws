@@ -1,4 +1,5 @@
 """Tests for the agent-mode evaluator layer."""
+
 from __future__ import annotations
 
 import os
@@ -37,9 +38,7 @@ class FakeEvaluator:
         envelope: dict,
         intent_context: Optional[str] = None,
     ) -> EvaluationResult:
-        self.calls.append(
-            {"brief": brief, "repo": repo, "repo_path": repo_path, "repo_trees": repo_trees}
-        )
+        self.calls.append({"brief": brief, "repo": repo, "repo_path": repo_path, "repo_trees": repo_trees})
         return self.result
 
 
@@ -133,8 +132,12 @@ def test_resolve_repo_path_returns_none_when_missing():
 def test_evaluator_skips_when_no_evaluator(session):
     """No evaluator configured → evaluation returns None, synthesis proceeds normally."""
     plan = SynthesizedPlan(
-        title="Build game", goal="Create snake", repo="studio-test",
-        allowed_paths=["**"], forbidden_paths=[], work_type="code",
+        title="Build game",
+        goal="Create snake",
+        repo="studio-test",
+        allowed_paths=["**"],
+        forbidden_paths=[],
+        work_type="code",
     )
     planner_client = FakePlannerClient(plan)
     service = PlannerService(session, planner_client=planner_client, evaluator=None)
@@ -150,15 +153,21 @@ def test_evaluator_skips_when_repo_trees_empty(session):
     """Empty repo_trees → fast-path skip, evaluator never called."""
     evaluator = FakeEvaluator(EvaluationResult(satisfied=True, findings="looks good", files_examined=[]))
     plan = SynthesizedPlan(
-        title="Build game", goal="Create snake", repo="studio-test",
-        allowed_paths=["**"], forbidden_paths=[], work_type="code",
+        title="Build game",
+        goal="Create snake",
+        repo="studio-test",
+        allowed_paths=["**"],
+        forbidden_paths=[],
+        work_type="code",
     )
     planner_client = FakePlannerClient(plan)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         service = PlannerService(
-            session, planner_client=planner_client,
-            evaluator=evaluator, source_repos_root=tmpdir,
+            session,
+            planner_client=planner_client,
+            evaluator=evaluator,
+            source_repos_root=tmpdir,
         )
         ps = _planning_session(session, repo_trees={})
         result = service.materialize_plan(ps.id)
@@ -171,16 +180,22 @@ def test_evaluator_skips_when_repo_path_missing(session):
     """Repo dir doesn't exist → fast-path skip."""
     evaluator = FakeEvaluator(EvaluationResult(satisfied=True, findings="looks good", files_examined=[]))
     plan = SynthesizedPlan(
-        title="Build game", goal="Create snake", repo="studio-test",
-        allowed_paths=["**"], forbidden_paths=[], work_type="code",
+        title="Build game",
+        goal="Create snake",
+        repo="studio-test",
+        allowed_paths=["**"],
+        forbidden_paths=[],
+        work_type="code",
     )
     planner_client = FakePlannerClient(plan)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         # No studio-test directory created inside tmpdir
         service = PlannerService(
-            session, planner_client=planner_client,
-            evaluator=evaluator, source_repos_root=tmpdir,
+            session,
+            planner_client=planner_client,
+            evaluator=evaluator,
+            source_repos_root=tmpdir,
         )
         ps = _planning_session(session, repo_trees={"studio-test": ["index.html"]})
         result = service.materialize_plan(ps.id)
@@ -196,16 +211,22 @@ def test_evaluator_skips_when_repo_path_missing(session):
 
 def test_evaluator_satisfied_returns_planner_result_satisfied(session):
     """Evaluator says satisfied + repo has files → SATISFIED returned."""
-    evaluator = FakeEvaluator(EvaluationResult(
-        satisfied=True, findings="Complete snake game found", files_examined=["index.html"],
-    ))
+    evaluator = FakeEvaluator(
+        EvaluationResult(
+            satisfied=True,
+            findings="Complete snake game found",
+            files_examined=["index.html"],
+        )
+    )
     planner_client = FakePlannerClient(PlannerResult.SATISFIED)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "studio-test"))
         service = PlannerService(
-            session, planner_client=planner_client,
-            evaluator=evaluator, source_repos_root=tmpdir,
+            session,
+            planner_client=planner_client,
+            evaluator=evaluator,
+            source_repos_root=tmpdir,
         )
         ps = _planning_session(session, repo_trees={"studio-test": ["index.html", "game.js"]})
         result = service.materialize_plan(ps.id)
@@ -221,21 +242,30 @@ def test_evaluator_satisfied_returns_planner_result_satisfied(session):
 
 def test_evaluation_findings_passed_to_synthesize(session):
     """Evaluator says NOT satisfied → findings passed to synthesis."""
-    evaluator = FakeEvaluator(EvaluationResult(
-        satisfied=False, findings="Only has stub index.html, no game logic",
-        files_examined=["index.html"],
-    ))
+    evaluator = FakeEvaluator(
+        EvaluationResult(
+            satisfied=False,
+            findings="Only has stub index.html, no game logic",
+            files_examined=["index.html"],
+        )
+    )
     plan = SynthesizedPlan(
-        title="Add game logic", goal="Implement snake movement", repo="studio-test",
-        allowed_paths=["**"], forbidden_paths=[], work_type="code",
+        title="Add game logic",
+        goal="Implement snake movement",
+        repo="studio-test",
+        allowed_paths=["**"],
+        forbidden_paths=[],
+        work_type="code",
     )
     planner_client = FakePlannerClient(plan)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "studio-test"))
         service = PlannerService(
-            session, planner_client=planner_client,
-            evaluator=evaluator, source_repos_root=tmpdir,
+            session,
+            planner_client=planner_client,
+            evaluator=evaluator,
+            source_repos_root=tmpdir,
         )
         ps = _planning_session(session, repo_trees={"studio-test": ["index.html"]})
         result = service.materialize_plan(ps.id)
@@ -252,16 +282,22 @@ def test_evaluator_failure_falls_back_to_synthesis(session):
             raise RuntimeError("Codex crashed")
 
     plan = SynthesizedPlan(
-        title="Build game", goal="Create snake", repo="studio-test",
-        allowed_paths=["**"], forbidden_paths=[], work_type="code",
+        title="Build game",
+        goal="Create snake",
+        repo="studio-test",
+        allowed_paths=["**"],
+        forbidden_paths=[],
+        work_type="code",
     )
     planner_client = FakePlannerClient(plan)
 
     with tempfile.TemporaryDirectory() as tmpdir:
         os.makedirs(os.path.join(tmpdir, "studio-test"))
         service = PlannerService(
-            session, planner_client=planner_client,
-            evaluator=FailingEvaluator(), source_repos_root=tmpdir,
+            session,
+            planner_client=planner_client,
+            evaluator=FailingEvaluator(),
+            source_repos_root=tmpdir,
         )
         ps = _planning_session(session, repo_trees={"studio-test": ["index.html"]})
         result = service.materialize_plan(ps.id)
