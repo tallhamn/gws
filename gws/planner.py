@@ -9,7 +9,8 @@ from pydantic import ValidationError
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from .contracts import PlannerResult, SynthesizedPlan
+from .contracts import EvaluationResult, PlannerResult, SynthesizedPlan
+from .evaluator import RepoEvaluator, resolve_repo_path
 from .models import (
     Outcome,
     OutcomePhase,
@@ -37,10 +38,14 @@ class PlannerService:
         planner_client: PlannerClient,
         *,
         lane_capabilities: Optional[dict[str, str]] = None,
+        evaluator: Optional[RepoEvaluator] = None,
+        source_repos_root: Optional[str] = None,
     ):
         self.session = session
         self.planner_client = planner_client
         self.lane_capabilities = lane_capabilities
+        self.evaluator = evaluator
+        self.source_repos_root = source_repos_root
 
     def _validate_plan(self, plan: SynthesizedPlan | dict) -> SynthesizedPlan:
         try:
@@ -116,6 +121,51 @@ class PlannerService:
                 return existing
         return None
 
+    def _evaluate_repo(
+        self,
+        *,
+        brief: str,
+        repo_heads: dict[str, str],
+        repo_trees: dict[str, list[str]],
+        envelope: dict,
+        intent_context: Optional[str] = None,
+    ) -> EvaluationResult | None:
+        """Run agent-mode evaluation. Returns None to skip (fast-path or disabled)."""
+        if not self.evaluator or not self.source_repos_root:
+            return None
+
+        all_files = [f for files in repo_trees.values() for f in files]
+        if not all_files:
+            logger.debug("Skipping evaluation: repo_trees is empty")
+            return None
+
+        repo = next(iter(repo_heads), None)
+        if not repo:
+            return None
+
+        repo_path = resolve_repo_path(self.source_repos_root, repo)
+        if not repo_path:
+            logger.debug("Skipping evaluation: repo path not found for %s", repo)
+            return None
+
+        try:
+            result = self.evaluator.evaluate(
+                brief=brief,
+                repo=repo,
+                repo_path=repo_path,
+                repo_trees=repo_trees.get(repo, []),
+                envelope=envelope,
+                intent_context=intent_context,
+            )
+            logger.info(
+                "Evaluation for repo %s: satisfied=%s, examined %d files",
+                repo, result.satisfied, len(result.files_examined),
+            )
+            return result
+        except Exception:
+            logger.exception("Evaluator failed for repo %s, falling back to synthesis-only", repo)
+            return None
+
     def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem] | PlannerResult:
         claim_result = self.session.execute(
             update(PlanningSession)
@@ -140,15 +190,51 @@ class PlannerService:
         try:
             context = planning_session.planning_context or {}
             repo_trees = dict(context.get("repo_trees", {}))
+            brief = str(context.get("brief", ""))
+            envelope = dict(context.get("envelope", {}))
+            intent_context = context.get("intent_context") or None
+
+            # Phase 1: Agent-mode evaluation (if configured)
+            evaluation = self._evaluate_repo(
+                brief=brief,
+                repo_heads=dict(planning_session.repo_heads),
+                repo_trees=repo_trees,
+                envelope=envelope,
+                intent_context=intent_context,
+            )
+
+            evaluation_findings: str | None = None
+            if evaluation is not None:
+                if evaluation.satisfied:
+                    # Evaluator says intent is satisfied — trust it if repo has files
+                    all_files = [f for files in repo_trees.values() for f in files]
+                    if all_files:
+                        planning_session.status = PlanningSessionStatus.SUCCEEDED
+                        planning_session.plan_payload = {
+                            "result": PlannerResult.SATISFIED.value,
+                            "evaluation_findings": evaluation.findings,
+                            "files_examined": evaluation.files_examined,
+                        }
+                        planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                        planning_session.outcome.phase = OutcomePhase.COMPLETED
+                        planning_session.outcome.result = OutcomeResult.ABANDONED
+                        planning_session.outcome.result_summary = "Intent already satisfied (evaluator)"
+                        planning_session.outcome.completed_at = planning_session.completed_at
+                        self.session.flush()
+                        return PlannerResult.SATISFIED
+                evaluation_findings = evaluation.findings
+
+            # Phase 2: Synthesize work plan
             raw_result = self.planner_client.synthesize(
-                brief=str(context.get("brief", "")),
+                brief=brief,
                 lane=planning_session.lane,
                 repo_heads=dict(planning_session.repo_heads),
-                envelope=dict(context.get("envelope", {})),
+                envelope=envelope,
                 lane_capabilities=self.lane_capabilities,
-                intent_context=context.get("intent_context") or None,
+                intent_context=intent_context,
                 planner_guidance=context.get("planner_guidance") or None,
                 repo_trees=repo_trees,
+                evaluation_findings=evaluation_findings,
             )
 
             if isinstance(raw_result, PlannerResult):

@@ -6,7 +6,7 @@ import re
 from collections.abc import Mapping
 from typing import Optional
 
-from gws.contracts import PlannerResult, SynthesizedPlan
+from gws.contracts import EvaluationResult, PlannerResult, SynthesizedPlan
 
 DEFAULT_CLAUDE_MODEL = "claude-sonnet-4-20250514"
 
@@ -27,13 +27,51 @@ _BASE_SYSTEM_PROMPT = (
 )
 
 
+_EVALUATION_PROMPT_TEMPLATE = (
+    "You are evaluating whether a codebase satisfies an intent.\n\n"
+    "INTENT:\n{brief}\n\n"
+    "EXISTING FILES IN REPO:\n{file_list}\n\n"
+    "INSTRUCTIONS:\n"
+    "1. Read the intent carefully. Understand what 'done' looks like.\n"
+    "2. Examine the files listed above. Read the key files that would prove the intent is met.\n"
+    "3. Assess: do the files contain working code that fulfills the intent?\n"
+    "4. If the repo is empty or files are stubs/boilerplate, the intent is NOT satisfied.\n\n"
+    "Return ONLY this JSON (no other text):\n"
+    '{{"satisfied": true/false, "findings": "<what you found>", "files_examined": ["file1", "file2"]}}'
+)
+
+
+def build_evaluation_prompt(
+    *,
+    brief: str,
+    repo_trees: list[str],
+    envelope: dict | None = None,
+    intent_context: str | None = None,
+) -> str:
+    file_list = "\n".join(repo_trees) if repo_trees else "(empty)"
+    parts = [_EVALUATION_PROMPT_TEMPLATE.format(brief=brief, file_list=file_list)]
+    if intent_context:
+        parts.append(f"Domain context: {intent_context}")
+    return "\n\n".join(parts)
+
+
+_FINDINGS_ADDENDUM = (
+    "IMPORTANT: An evaluator has already examined the repo and produced the following assessment. "
+    "Use these findings to guide your planning instead of guessing from file names alone. "
+    "If the evaluator says the intent is not satisfied, plan the next work item to address the gaps it identified."
+)
+
+
 def build_system_prompt(
     *,
     lane_capabilities: Optional[dict[str, str]] = None,
     intent_context: Optional[str] = None,
     planner_guidance: Optional[str] = None,
+    evaluation_findings: Optional[str] = None,
 ) -> str:
     parts = [_BASE_SYSTEM_PROMPT]
+    if evaluation_findings:
+        parts.append(f"{_FINDINGS_ADDENDUM}\n\nEvaluation findings: {evaluation_findings}")
     if lane_capabilities:
         lanes_block = "\n".join(f"  - {name}: {cap}" for name, cap in lane_capabilities.items())
         parts.append(f"Available lanes and their capabilities:\n{lanes_block}")
@@ -113,6 +151,24 @@ def _parse_json_like_mapping(text: str) -> Mapping[str, object]:
     if not isinstance(parsed, Mapping):
         raise ValueError("planner response JSON must be an object")
     return parsed
+
+
+def parse_evaluation_output(text: str) -> EvaluationResult:
+    """Parse evaluator CLI output into an EvaluationResult."""
+    stripped = text.strip()
+    if not stripped:
+        return EvaluationResult(satisfied=False, findings="evaluator produced no output", files_examined=[])
+
+    try:
+        extracted = _extract_json(stripped)
+        parsed = _parse_json_like_mapping(extracted)
+        return EvaluationResult(
+            satisfied=bool(parsed.get("satisfied", False)),
+            findings=str(parsed.get("findings", "")),
+            files_examined=list(parsed.get("files_examined", [])),
+        )
+    except (ValueError, KeyError):
+        return EvaluationResult(satisfied=False, findings=stripped, files_examined=[])
 
 
 def parse_synthesized_plan_text(text: str) -> SynthesizedPlan | PlannerResult:

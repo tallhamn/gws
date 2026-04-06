@@ -41,6 +41,7 @@ class ClaudeCodePlannerClient:
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
         repo_trees: dict[str, list[str]] | None = None,
+        evaluation_findings: Optional[str] = None,
     ) -> SynthesizedPlan | PlannerResult:
         if not self.is_available(self.command):
             raise RuntimeError(f"Claude Code command not found: {self.command}")
@@ -49,11 +50,18 @@ class ClaudeCodePlannerClient:
             lane_capabilities=lane_capabilities,
             intent_context=intent_context,
             planner_guidance=planner_guidance,
+            evaluation_findings=evaluation_findings,
         )
-        user_data = json.dumps(
-            {"brief": brief, "lane": lane, "repo_heads": repo_heads, "repo_trees": repo_trees or {}, "envelope": envelope},
-            indent=2,
-        )
+        payload = {
+            "brief": brief,
+            "lane": lane,
+            "repo_heads": repo_heads,
+            "repo_trees": repo_trees or {},
+            "envelope": envelope,
+        }
+        if evaluation_findings:
+            payload["evaluation_findings"] = evaluation_findings
+        user_data = json.dumps(payload, indent=2)
         args = [
             self.command,
             "-p",

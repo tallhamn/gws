@@ -16,6 +16,7 @@ from .models import (
     PlanningSessionStatus,
     WorkItem,
 )
+from .evaluator import RepoEvaluator
 from .planner import PlannerService
 from .planner_client import PlannerClient
 
@@ -29,6 +30,8 @@ class PlanningCoordinator:
         planner_provider: str,
         planner_model: Optional[str],
         lane_capabilities: Optional[dict[str, str]] = None,
+        evaluator: Optional[RepoEvaluator] = None,
+        source_repos_root: Optional[str] = None,
     ):
         self.session = session
         self.planner_provider = planner_provider
@@ -37,6 +40,8 @@ class PlanningCoordinator:
             session,
             planner_client=planner_client,
             lane_capabilities=lane_capabilities,
+            evaluator=evaluator,
+            source_repos_root=source_repos_root,
         )
 
     def _planning_envelope(

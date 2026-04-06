@@ -57,16 +57,24 @@ class AnthropicPlannerClient:
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
         repo_trees: dict[str, list[str]] | None = None,
+        evaluation_findings: Optional[str] = None,
     ) -> SynthesizedPlan | PlannerResult:
         system_prompt = build_system_prompt(
             lane_capabilities=lane_capabilities,
             intent_context=intent_context,
             planner_guidance=planner_guidance,
+            evaluation_findings=evaluation_findings,
         )
-        user_data = json.dumps(
-            {"brief": brief, "lane": lane, "repo_heads": repo_heads, "repo_trees": repo_trees or {}, "envelope": envelope},
-            indent=2,
-        )
+        payload = {
+            "brief": brief,
+            "lane": lane,
+            "repo_heads": repo_heads,
+            "repo_trees": repo_trees or {},
+            "envelope": envelope,
+        }
+        if evaluation_findings:
+            payload["evaluation_findings"] = evaluation_findings
+        user_data = json.dumps(payload, indent=2)
         last_exc = None
         for attempt in range(3):
             try:

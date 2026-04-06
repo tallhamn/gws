@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import enum
+from dataclasses import dataclass, field
 
 from pydantic import BaseModel, Field
 
@@ -18,6 +19,13 @@ class SynthesizedPlan(BaseModel):
     allowed_paths: list[str] = Field(default_factory=list)
     forbidden_paths: list[str] = Field(default_factory=list)
     work_type: str
+
+
+@dataclass
+class EvaluationResult:
+    satisfied: bool
+    findings: str
+    files_examined: list[str] = field(default_factory=list)
 
 
 class WorkerLeaseRequest(BaseModel):

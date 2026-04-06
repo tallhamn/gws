@@ -35,6 +35,7 @@ class FakePlannerClient:
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
         repo_trees: dict[str, list[str]] | None = None,
+        evaluation_findings: Optional[str] = None,
     ) -> dict:
         self.calls.append(
             {
@@ -628,7 +629,16 @@ def test_planner_does_not_cache_satisfied_on_intent_when_planner_returns_satisfi
     from gws.contracts import PlannerResult
     from gws.models import IntentStatus
 
-    planning = _planning_session(session)
+    planning = _planning_session(
+        session,
+        planning_context={
+            "brief": "ship /music",
+            "envelope": {"max_runtime": 900},
+            "intent_context": "music domain",
+            "planner_guidance": "prefer minimal changes",
+            "repo_trees": {"repo-a": ["index.html"]},
+        },
+    )
     planner_client = FakePlannerClient(PlannerResult.SATISFIED)
 
     planner = PlannerService(session, planner_client=planner_client)
@@ -797,6 +807,7 @@ def test_coordinator_returns_none_when_planner_is_satisfied(session):
         lane="coder",
         available_repos=["repo-a"],
         repo_heads={"repo-a": "abc123"},
+        repo_trees={"repo-a": ["index.html"]},
     )
 
     assert result is None

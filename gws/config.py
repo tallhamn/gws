@@ -21,3 +21,8 @@ class Settings(BaseSettings):
     planner_effort: str = "max"
     planner_timeout: float = 60.0
     gateway_url: Optional[str] = None
+    source_repos_root: Optional[str] = None
+    evaluator_provider: str = "codex"
+    evaluator_model: Optional[str] = None
+    evaluator_timeout: float = 120.0
+    evaluator_command: str = "codex"

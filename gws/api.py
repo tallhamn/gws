@@ -115,14 +115,19 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return None
 
         try:
+            from .evaluator import build_evaluator
+
             planner_client = build_planner_client(settings)
             policy = PolicyEngine.from_file(settings.policy_path)
+            evaluator = build_evaluator(settings)
             coordinator = PlanningCoordinator(
                 session,
                 planner_client=planner_client,
                 planner_provider=settings.planner_provider,
                 planner_model=settings.planner_model,
                 lane_capabilities=policy.lane_capabilities(),
+                evaluator=evaluator,
+                source_repos_root=settings.source_repos_root,
             )
             result = coordinator.plan_outcome(
                 intent_id=intent.intent_id,
