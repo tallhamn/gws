@@ -91,6 +91,7 @@ class PlanningCoordinator:
         lane: str,
         available_repos: list[str],
         repo_heads: dict[str, str],
+        repo_trees: dict[str, list[str]] | None = None,
     ) -> tuple[Outcome, WorkItem] | None:
         intent = (
             self.session.query(IntentVersion)
@@ -129,6 +130,7 @@ class PlanningCoordinator:
                 "intent_context": intent.context,
                 "planner_guidance": intent.planner_guidance,
                 "target_branch": intent.target_branch,
+                "repo_trees": repo_trees or {},
             },
         )
         self.session.add_all([outcome, planning_session])

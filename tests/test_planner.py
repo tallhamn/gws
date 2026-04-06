@@ -34,6 +34,7 @@ class FakePlannerClient:
         lane_capabilities: Optional[dict] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
+        repo_trees: dict[str, list[str]] | None = None,
     ) -> dict:
         self.calls.append(
             {
@@ -231,6 +232,7 @@ def test_build_planner_client_uses_planner_model_in_real_anthropic_path(monkeypa
         "brief": "brief",
         "lane": "lane",
         "repo_heads": {"repo-a": "abc123"},
+        "repo_trees": {},
         "envelope": {"max_runtime": 1},
     }
 
@@ -622,7 +624,7 @@ def test_changed_hunks_preserves_changed_lines_that_begin_with_triple_markers(mo
     ]
 
 
-def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
+def test_planner_does_not_cache_satisfied_on_intent_when_planner_returns_satisfied(session):
     from gws.contracts import PlannerResult
     from gws.models import IntentStatus
 
@@ -646,7 +648,7 @@ def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
     assert stored_planning.status is PlanningSessionStatus.SUCCEEDED
     assert stored_planning.completed_at is not None
     assert stored_planning.plan_payload == {"result": "satisfied"}
-    assert intent.status is IntentStatus.SATISFIED
+    assert intent.status is IntentStatus.ACTIVE
     assert session.query(WorkItem).count() == 0
 
     stored_outcome = session.get(Outcome, stored_planning.outcome_id)
@@ -805,7 +807,7 @@ def test_coordinator_returns_none_when_planner_is_satisfied(session):
         .order_by(IntentVersion.intent_version.desc())
         .first()
     )
-    assert intent.status is IntentStatus.SATISFIED
+    assert intent.status is IntentStatus.ACTIVE
 
 
 def test_parse_synthesized_plan_text_returns_satisfied_for_satisfied_string():

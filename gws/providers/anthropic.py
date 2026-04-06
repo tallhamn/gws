@@ -56,6 +56,7 @@ class AnthropicPlannerClient:
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
+        repo_trees: dict[str, list[str]] | None = None,
     ) -> SynthesizedPlan | PlannerResult:
         system_prompt = build_system_prompt(
             lane_capabilities=lane_capabilities,
@@ -63,7 +64,7 @@ class AnthropicPlannerClient:
             planner_guidance=planner_guidance,
         )
         user_data = json.dumps(
-            {"brief": brief, "lane": lane, "repo_heads": repo_heads, "envelope": envelope},
+            {"brief": brief, "lane": lane, "repo_heads": repo_heads, "repo_trees": repo_trees or {}, "envelope": envelope},
             indent=2,
         )
         last_exc = None

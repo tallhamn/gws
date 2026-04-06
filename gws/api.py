@@ -91,6 +91,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         intent_id: str | None,
         accessible_repos: list[str],
         eligible_repo_heads: dict[str, str],
+        repo_trees: dict[str, list[str]],
     ):
         from .models import IntentVersion
         from .planner_client import build_planner_client
@@ -106,11 +107,6 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         else:
             intent = session.query(IntentVersion).order_by(IntentVersion.created_at.desc()).first()
         if intent is None:
-            return None
-
-        from .models import IntentStatus
-
-        if intent.status is IntentStatus.SATISFIED:
             return None
 
         # Only one worker plans at a time; others get None (no work) instead of queueing
@@ -134,6 +130,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 lane=worker.lane,
                 available_repos=accessible_repos,
                 repo_heads=eligible_repo_heads,
+                repo_trees=repo_trees,
             )
             if result is None:
                 return None
@@ -202,6 +199,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
 
             work_item = work_item_query.order_by(WorkItem.id).first()
 
+            repo_trees = dict(payload.repo_trees) if payload.repo_trees else {}
+
             if work_item is None and eligible_repo_heads:
                 try:
                     work_item = _jit_plan_work_item(
@@ -210,6 +209,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                         intent_id=payload.intent_id,
                         accessible_repos=accessible_repos,
                         eligible_repo_heads=eligible_repo_heads,
+                        repo_trees=repo_trees,
                     )
                 except PlanningUnavailableError as exc:
                     raise HTTPException(

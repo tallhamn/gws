@@ -22,6 +22,7 @@ class SynthesizedPlan(BaseModel):
 
 class WorkerLeaseRequest(BaseModel):
     repo_heads: dict[str, str] = Field(default_factory=dict)
+    repo_trees: dict[str, list[str]] = Field(default_factory=dict)
     intent_id: str | None = None
     ttl_seconds: int = 60
 

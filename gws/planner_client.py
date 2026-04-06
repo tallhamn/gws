@@ -18,6 +18,7 @@ class PlannerClient(Protocol):
         lane_capabilities: Optional[dict[str, str]] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
+        repo_trees: dict[str, list[str]] | None = None,
     ) -> SynthesizedPlan | PlannerResult: ...
 
 

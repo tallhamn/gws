@@ -150,7 +150,7 @@ def test_full_flow_intent_to_outcome_completion(session):
     session.commit()
 
     class MockPlanner:
-        def synthesize(self, *, brief, lane, repo_heads, envelope, **kwargs):
+        def synthesize(self, *, brief, lane, repo_heads, envelope, repo_trees=None, **kwargs):
             assert "lane_capabilities" in kwargs or kwargs.get("lane_capabilities") is None
             return {
                 "title": "Build player movement",

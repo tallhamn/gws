@@ -30,6 +30,7 @@ class FakePlannerClient:
         lane_capabilities: Optional[dict] = None,
         intent_context: Optional[str] = None,
         planner_guidance: Optional[str] = None,
+        repo_trees: dict[str, list[str]] | None = None,
     ):
         self.calls.append(
             {

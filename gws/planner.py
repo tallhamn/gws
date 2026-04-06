@@ -11,8 +11,6 @@ from sqlalchemy.orm import Session
 
 from .contracts import PlannerResult, SynthesizedPlan
 from .models import (
-    IntentStatus,
-    IntentVersion,
     Outcome,
     OutcomePhase,
     OutcomeResult,
@@ -141,6 +139,7 @@ class PlannerService:
 
         try:
             context = planning_session.planning_context or {}
+            repo_trees = dict(context.get("repo_trees", {}))
             raw_result = self.planner_client.synthesize(
                 brief=str(context.get("brief", "")),
                 lane=planning_session.lane,
@@ -149,6 +148,7 @@ class PlannerService:
                 lane_capabilities=self.lane_capabilities,
                 intent_context=context.get("intent_context") or None,
                 planner_guidance=context.get("planner_guidance") or None,
+                repo_trees=repo_trees,
             )
 
             if isinstance(raw_result, PlannerResult):
@@ -156,16 +156,6 @@ class PlannerService:
                 planning_session.plan_payload = {"result": raw_result.value}
                 planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                 if raw_result is PlannerResult.SATISFIED:
-                    intent = (
-                        self.session.query(IntentVersion)
-                        .filter(
-                            IntentVersion.intent_id == planning_session.outcome.intent_id,
-                            IntentVersion.intent_version == planning_session.outcome.intent_version,
-                        )
-                        .one()
-                    )
-                    intent.status = IntentStatus.SATISFIED
-
                     planning_session.outcome.phase = OutcomePhase.COMPLETED
                     planning_session.outcome.result = OutcomeResult.ABANDONED
                     planning_session.outcome.result_summary = "Intent already satisfied"
