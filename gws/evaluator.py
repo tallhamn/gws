@@ -36,6 +36,12 @@ def build_evaluator(settings: Settings) -> RepoEvaluator | None:
     if not settings.source_repos_root:
         return None
 
+    if not os.path.isdir(settings.source_repos_root):
+        raise RuntimeError(
+            f"GWS_SOURCE_REPOS_ROOT is set to '{settings.source_repos_root}' but the directory does not exist. "
+            "GWS cannot evaluate intent satisfaction without repo access."
+        )
+
     provider = settings.evaluator_provider
     model = settings.evaluator_model or settings.planner_model
 
