@@ -55,6 +55,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     Base.metadata.create_all(engine)
     logger.info("GWS app created, database_url=%s", settings.database_url.split("@")[-1])
 
+    from .canary import run_planner_canary
+
+    try:
+        run_planner_canary(settings)
+    except RuntimeError:
+        logger.exception("Planner canary failed — model cannot produce valid output")
+        raise
+
     if settings.api_key:
 
         @app.middleware("http")
@@ -76,8 +84,43 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             return await call_next(request)
 
     @app.get("/healthz")
-    def healthz() -> dict[str, str]:
-        return {"status": "ok"}
+    def healthz() -> dict:
+        from datetime import datetime, timedelta, timezone
+
+        from .models import PlanningSession, PlanningSessionStatus
+
+        with session_factory() as session:
+            since = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+            succeeded = (
+                session.query(PlanningSession)
+                .filter(
+                    PlanningSession.status == PlanningSessionStatus.SUCCEEDED,
+                    PlanningSession.completed_at >= since,
+                )
+                .count()
+            )
+            failed = (
+                session.query(PlanningSession)
+                .filter(
+                    PlanningSession.status == PlanningSessionStatus.FAILED,
+                    PlanningSession.completed_at >= since,
+                )
+                .count()
+            )
+            total = succeeded + failed
+            success_rate = round(succeeded / total, 2) if total > 0 else None
+
+        result = {
+            "status": "ok" if (success_rate is None or success_rate >= 0.5) else "degraded",
+            "planning_last_30m": {
+                "succeeded": succeeded,
+                "failed": failed,
+                "success_rate": success_rate,
+            },
+            "planner_model": settings.planner_model,
+            "evaluator_provider": settings.evaluator_provider if settings.source_repos_root else None,
+        }
+        return result
 
     def _control_plane(session) -> ControlPlaneService:
         return ControlPlaneService(session, policy_path=settings.policy_path)

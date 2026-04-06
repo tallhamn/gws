@@ -21,7 +21,9 @@ def test_healthz_returns_ok(tmp_path):
     response = client.get("/healthz")
 
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    data = response.json()
+    assert data["status"] == "ok"
+    assert "planning_last_30m" in data
 
 
 def test_unauthenticated_request_returns_401_when_api_key_set(tmp_path):
