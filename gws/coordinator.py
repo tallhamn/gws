@@ -6,6 +6,7 @@ from typing import Optional
 from sqlalchemy.orm import Session
 
 from .contracts import PlannerResult
+from .evaluator import RepoEvaluator
 from .models import (
     IntentVersion,
     Outcome,
@@ -16,7 +17,6 @@ from .models import (
     PlanningSessionStatus,
     WorkItem,
 )
-from .evaluator import RepoEvaluator
 from .planner import PlannerService
 from .planner_client import PlannerClient
 

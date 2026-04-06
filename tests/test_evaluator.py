@@ -8,18 +8,14 @@ from typing import Optional
 import pytest
 
 from gws.contracts import EvaluationResult, PlannerResult, SynthesizedPlan
-from gws.evaluator import build_evaluator, resolve_repo_path
+from gws.evaluator import resolve_repo_path
 from gws.models import (
     IntentVersion,
     Outcome,
     OutcomePhase,
-    OutcomeResult,
     PlanningSession,
-    PlanningSessionStatus,
-    WorkItem,
 )
 from gws.planner import PlannerService
-
 
 # ---------------------------------------------------------------------------
 # Fakes
