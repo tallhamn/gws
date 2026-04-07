@@ -36,14 +36,17 @@ _BASE_SYSTEM_PROMPT = (
 _EVALUATION_PROMPT_TEMPLATE = (
     "You are evaluating whether a codebase satisfies an intent.\n\n"
     "INTENT:\n{brief}\n\n"
-    "EXISTING FILES IN REPO:\n{file_list}\n\n"
+    "{context_block}"
     "INSTRUCTIONS:\n"
-    "1. Read the intent carefully. Understand what 'done' looks like.\n"
-    "2. Examine the files listed above. Read the key files that would prove the intent is met.\n"
-    "3. Assess: do the files contain working code that fulfills the intent?\n"
-    "4. If the repo is empty or files are stubs/boilerplate, the intent is NOT satisfied.\n\n"
+    "1. Read the intent carefully. Extract every specific requirement and feature.\n"
+    "2. Browse the repo and read the actual source files. {path_instruction}\n"
+    "3. Check EACH requirement from the intent against the code. "
+    "Does the code actually implement it, or just have the right file name?\n"
+    "4. If ANY core requirement is missing or stubbed, the intent is NOT satisfied.\n"
+    "5. Be strict. A file existing is not enough — the feature must work.\n\n"
     "Return ONLY this JSON (no other text):\n"
-    '{{"satisfied": true/false, "findings": "<what you found>", "files_examined": ["file1", "file2"]}}'
+    '{{"satisfied": true/false, "findings": "<what you found, with specific requirements checked>", '
+    '"files_examined": ["file1", "file2"]}}'
 )
 
 
@@ -54,10 +57,31 @@ def build_evaluation_prompt(
     envelope: dict | None = None,
     intent_context: str | None = None,
 ) -> str:
-    file_list = "\n".join(repo_trees) if repo_trees else "(empty)"
-    parts = [_EVALUATION_PROMPT_TEMPLATE.format(brief=brief, file_list=file_list)]
+    context_block = ""
+    path_instruction = "Look for files that would implement the intent."
     if intent_context:
-        parts.append(f"Domain context: {intent_context}")
+        context_block = f"CONTEXT:\n{intent_context}\n\n"
+        # Extract artifact path from context if present
+        import re
+
+        path_match = re.search(r"(?:artifact|drop|output).*?(?:at|in)\s+(\S+/index\.html|\S+/)", intent_context)
+        if path_match:
+            artifact_path = path_match.group(1)
+            path_instruction = (
+                f"ONLY examine files under {artifact_path} — "
+                "other files in the repo belong to different drops and are irrelevant."
+            )
+
+    if repo_trees:
+        context_block += "KNOWN FILES IN REPO:\n" + "\n".join(repo_trees) + "\n\n"
+
+    parts = [
+        _EVALUATION_PROMPT_TEMPLATE.format(
+            brief=brief,
+            context_block=context_block,
+            path_instruction=path_instruction,
+        )
+    ]
     return "\n\n".join(parts)
 
 
