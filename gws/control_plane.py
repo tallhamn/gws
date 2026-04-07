@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -191,7 +192,7 @@ class ControlPlaneService:
         worker_id: str,
         touched_paths: list[str],
         changed_hunks: list[str],
-    ) -> None:
+    ) -> SimpleNamespace:
         work_item = self.session.get(WorkItem, work_item_id)
         if work_item is None:
             raise ValueError(f"unknown work_item_id: {work_item_id}")
@@ -262,6 +263,7 @@ class ControlPlaneService:
             )
 
         self.session.commit()
+        return verdict
 
     def heartbeat_lease(self, lease_id: int, ttl_seconds: int = 60) -> Lease:
         if ttl_seconds <= 0:

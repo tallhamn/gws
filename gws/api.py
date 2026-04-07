@@ -209,7 +209,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         with session_factory() as session:
             service = _control_plane(session)
             try:
-                service.apply_attempt_completion(
+                verdict = service.apply_attempt_completion(
                     work_item_id=work_item_id,
                     worker_id=worker.worker_id,
                     touched_paths=touched_paths,
@@ -222,8 +222,14 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 if str(exc) == f"unknown work_item_id: {work_item_id}":
                     raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Work item not found") from exc
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
-            logger.info("Work item %d completed, status=%s", work_item_id, "processed")
-            return WorkerCompletionResponse(status="processed")
+            verdict_result = getattr(verdict, "result", "pass") if verdict else "pass"
+            triggered_lanes = getattr(verdict, "triggered_lanes", []) if verdict else []
+            logger.info("Work item %d completed, verdict=%s", work_item_id, verdict_result)
+            return WorkerCompletionResponse(
+                status="processed",
+                verdict=verdict_result,
+                governance_lanes=triggered_lanes,
+            )
 
     @app.post("/worker/lease", response_model=WorkerLeaseResponse)
     def lease_work(

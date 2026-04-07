@@ -77,3 +77,5 @@ class WorkerCompletionRequest(BaseModel):
 
 class WorkerCompletionResponse(BaseModel):
     status: str
+    verdict: str = "pass"
+    governance_lanes: list[str] = Field(default_factory=list)
