@@ -42,6 +42,14 @@ class PlanningUnavailableError(RuntimeError):
 
 
 def create_app(settings: Optional[Settings] = None) -> FastAPI:
+    import sys
+
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)-5s [%(name)s] %(message)s",
+        stream=sys.stderr,
+    )
+
     app = FastAPI(title="GWS Control Plane")
     settings = settings or Settings()
     worker_registry = WorkerRegistry.from_file(settings.workers_path)
