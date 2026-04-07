@@ -78,37 +78,47 @@ class CodexEvaluator:
         ]
 
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 args,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout,
                 cwd=repo_path,
                 env=env,
+                start_new_session=True,  # new process group so we can kill the whole tree
             )
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                import signal
+
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+                logger.warning("Codex evaluator timed out after %.0fs for repo %s", self.timeout, repo)
+                return EvaluationResult(
+                    satisfied=False,
+                    findings=f"Evaluation timed out after {self.timeout}s",
+                    files_examined=[],
+                )
+            completed_returncode = proc.returncode
+            completed_stdout = stdout
+            completed_stderr = stderr
         except FileNotFoundError:
             raise RuntimeError(f"Codex command not found: {self.command}")
-        except subprocess.TimeoutExpired:
-            logger.warning("Codex evaluator timed out after %.0fs for repo %s", self.timeout, repo)
-            return EvaluationResult(
-                satisfied=False,
-                findings=f"Evaluation timed out after {self.timeout}s",
-                files_examined=[],
-            )
 
-        if completed.returncode != 0:
-            detail = (completed.stderr or completed.stdout or "").strip()
-            logger.warning("Codex evaluator exited %d for repo %s: %s", completed.returncode, repo, detail)
+        if completed_returncode != 0:
+            detail = (completed_stderr or completed_stdout or "").strip()
+            logger.warning("Codex evaluator exited %d for repo %s: %s", completed_returncode, repo, detail)
             return EvaluationResult(
                 satisfied=False,
-                findings=f"Evaluation failed (exit {completed.returncode}): {detail}",
+                findings=f"Evaluation failed (exit {completed_returncode}): {detail}",
                 files_examined=[],
             )
 
         try:
             output_text = Path(output_path).read_text().strip()
         except FileNotFoundError:
-            output_text = (completed.stdout or "").strip()
+            output_text = (completed_stdout or "").strip()
         finally:
             try:
                 os.unlink(output_path)
@@ -116,7 +126,7 @@ class CodexEvaluator:
                 pass
 
         if not output_text:
-            output_text = (completed.stdout or "").strip()
+            output_text = (completed_stdout or "").strip()
 
         logger.info("Codex evaluator result for repo %s (%d chars)", repo, len(output_text))
         return parse_evaluation_output(output_text)

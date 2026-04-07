@@ -62,32 +62,39 @@ class ClaudeCodeEvaluator:
         ]
 
         try:
-            completed = subprocess.run(
+            proc = subprocess.Popen(
                 args,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=self.timeout,
-                check=True,
                 cwd=repo_path,
+                start_new_session=True,
             )
+            try:
+                stdout, stderr = proc.communicate(timeout=self.timeout)
+            except subprocess.TimeoutExpired:
+                import os
+                import signal
+
+                os.killpg(proc.pid, signal.SIGKILL)
+                proc.wait(timeout=5)
+                logger.warning("Claude Code evaluator timed out after %.0fs for repo %s", self.timeout, repo)
+                return EvaluationResult(
+                    satisfied=False,
+                    findings=f"Evaluation timed out after {self.timeout}s",
+                    files_examined=[],
+                )
+            if proc.returncode != 0:
+                detail = (stderr or stdout or "").strip()
+                logger.warning("Claude Code evaluator failed for repo %s: %s", repo, detail)
+                return EvaluationResult(
+                    satisfied=False,
+                    findings=f"Evaluation failed: {detail}",
+                    files_examined=[],
+                )
         except FileNotFoundError:
             raise RuntimeError(f"Claude Code command not found: {self.command}")
-        except subprocess.TimeoutExpired:
-            logger.warning("Claude Code evaluator timed out after %.0fs for repo %s", self.timeout, repo)
-            return EvaluationResult(
-                satisfied=False,
-                findings=f"Evaluation timed out after {self.timeout}s",
-                files_examined=[],
-            )
-        except subprocess.CalledProcessError as exc:
-            detail = (exc.stderr or exc.stdout or "").strip()
-            logger.warning("Claude Code evaluator failed for repo %s: %s", repo, detail)
-            return EvaluationResult(
-                satisfied=False,
-                findings=f"Evaluation failed: {detail}",
-                files_examined=[],
-            )
 
-        output_text = completed.stdout.strip()
+        output_text = stdout.strip()
         logger.info("Claude Code evaluator result for repo %s (%d chars)", repo, len(output_text))
         return parse_evaluation_output(output_text)
