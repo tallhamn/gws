@@ -216,22 +216,19 @@ class PlannerService:
             evaluation_findings: str | None = None
             if evaluation is not None:
                 if evaluation.satisfied:
-                    # Evaluator says intent is satisfied — trust it if repo has files
-                    all_files = [f for files in repo_trees.values() for f in files]
-                    if all_files:
-                        planning_session.status = PlanningSessionStatus.SUCCEEDED
-                        planning_session.plan_payload = {
-                            "result": PlannerResult.SATISFIED.value,
-                            "evaluation_findings": evaluation.findings,
-                            "files_examined": evaluation.files_examined,
-                        }
-                        planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
-                        planning_session.outcome.phase = OutcomePhase.COMPLETED
-                        planning_session.outcome.result = OutcomeResult.ABANDONED
-                        planning_session.outcome.result_summary = "Intent already satisfied (evaluator)"
-                        planning_session.outcome.completed_at = planning_session.completed_at
-                        self.session.flush()
-                        return PlannerResult.SATISFIED
+                    planning_session.status = PlanningSessionStatus.SUCCEEDED
+                    planning_session.plan_payload = {
+                        "result": PlannerResult.SATISFIED.value,
+                        "evaluation_findings": evaluation.findings,
+                        "files_examined": evaluation.files_examined,
+                    }
+                    planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    planning_session.outcome.phase = OutcomePhase.COMPLETED
+                    planning_session.outcome.result = OutcomeResult.ABANDONED
+                    planning_session.outcome.result_summary = "Intent already satisfied (evaluator)"
+                    planning_session.outcome.completed_at = planning_session.completed_at
+                    self.session.flush()
+                    return PlannerResult.SATISFIED
                 evaluation_findings = evaluation.findings
 
             # Phase 2: Synthesize work plan
