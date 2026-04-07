@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-import threading
+
 from typing import Optional
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
@@ -133,7 +133,8 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
     def _control_plane(session) -> ControlPlaneService:
         return ControlPlaneService(session, policy_path=settings.policy_path)
 
-    _planning_lock = threading.Lock()
+    # Per-intent planning locks: at most 1 planning request per intent at a time
+    _intent_planning: dict[str, bool] = {}
 
     def _jit_plan_work_item(
         *,
@@ -144,7 +145,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         eligible_repo_heads: dict[str, str],
         repo_trees: dict[str, list[str]],
     ):
-        from .models import IntentVersion
+        from .models import IntentVersion, Outcome, WorkItem, WorkItemStatus
         from .planner_client import build_planner_client
         from .policy import PolicyEngine
 
@@ -160,10 +161,26 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         if intent is None:
             return None
 
-        # Only one worker plans at a time; others get None (no work) instead of queueing
-        if not _planning_lock.acquire(blocking=False):
-            logger.info("JIT planning already in progress, skipping for lane %s", worker.lane)
+        # Don't plan if there's already a READY (unstarted) work item for this intent.
+        # This limits the queue to at most 1 planned-but-waiting task per intent.
+        ready_count = (
+            session.query(WorkItem)
+            .join(Outcome, WorkItem.outcome_id == Outcome.id)
+            .filter(
+                Outcome.intent_id == intent.intent_id,
+                WorkItem.status == WorkItemStatus.READY,
+            )
+            .count()
+        )
+        if ready_count > 0:
+            logger.debug("Skipping planning for %s — %d READY work items already queued", intent.intent_id, ready_count)
             return None
+
+        # Per-intent lock: only one worker plans for a given intent at a time
+        if _intent_planning.get(intent.intent_id):
+            logger.info("Planning already in progress for %s, skipping for lane %s", intent.intent_id, worker.lane)
+            return None
+        _intent_planning[intent.intent_id] = True
 
         try:
             from .evaluator import build_evaluator
@@ -197,7 +214,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             logger.exception("JIT planning failed for lane %s", worker.lane)
             raise PlanningUnavailableError("Planning unavailable") from exc
         finally:
-            _planning_lock.release()
+            _intent_planning.pop(intent.intent_id, None)
 
     async def _complete_work_item_for_worker(
         *,
