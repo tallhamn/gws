@@ -53,10 +53,15 @@ def verify_attempt(
             reasons=["forbidden_path"],
         )
 
-    allowed = bool(allowed_paths) and all(
-        any(fnmatch(path, pattern) for pattern in allowed_paths) for path in touched_paths
-    )
-    if not allowed:
+    out_of_scope = [
+        path for path in touched_paths
+        if not any(fnmatch(path, pattern) for pattern in allowed_paths)
+    ]
+    if out_of_scope:
+        logger.warning(
+            "Out-of-scope paths rejected: %s (allowed: %s)",
+            out_of_scope[:5], allowed_paths,
+        )
         return SimpleNamespace(
             result="fail_and_replan",
             triggered_lanes=[],
