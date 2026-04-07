@@ -134,11 +134,6 @@ class PlannerService:
         if not self.evaluator or not self.source_repos_root:
             return None
 
-        all_files = [f for files in repo_trees.values() for f in files]
-        if not all_files:
-            logger.debug("Skipping evaluation: repo_trees is empty")
-            return None
-
         repo = next(iter(repo_heads), None)
         if not repo:
             return None
@@ -146,6 +141,19 @@ class PlannerService:
         repo_path = resolve_repo_path(self.source_repos_root, repo)
         if not repo_path:
             logger.debug("Skipping evaluation: repo path not found for %s", repo)
+            return None
+
+        # Use repo_trees if provided, otherwise scan the source repo mount directly
+        files_for_repo = repo_trees.get(repo, [])
+        if not files_for_repo:
+            import os
+
+            for _root, _dirs, _files in os.walk(repo_path):
+                if _files:
+                    files_for_repo = ["(files found on mount)"]
+                    break
+        if not files_for_repo:
+            logger.debug("Skipping evaluation: no files found for %s", repo)
             return None
 
         try:
