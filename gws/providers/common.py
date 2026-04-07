@@ -24,7 +24,9 @@ _BASE_SYSTEM_PROMPT = (
     'If the intent is satisfied: {"result": "satisfied"} '
     "If work is needed: "
     '{"result": "plan", "title": "...", "goal": "...", "repo": "...", '
-    '"allowed_paths": [...], "forbidden_paths": [...], "work_type": "code|brief"} '
+    '"allowed_paths": ["drops/X-name/**"], "forbidden_paths": [], "work_type": "code|brief"} '
+    "IMPORTANT: allowed_paths MUST use glob patterns with ** wildcards (e.g. 'drops/3-game/**'), "
+    "NOT specific filenames. The agent needs freedom to create any files within the allowed directory. "
     "work_type must be 'code' for tasks that write or modify source files, "
     "or 'brief' for tasks that synthesize a game brief from team discussions. "
     "Use 'brief' only when the team needs a brief written or updated and there is no locked brief yet. "
