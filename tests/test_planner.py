@@ -837,6 +837,25 @@ def test_parse_synthesized_plan_text_returns_satisfied_with_whitespace():
     assert result is PlannerResult.SATISFIED
 
 
+def test_parse_synthesized_plan_text_returns_satisfied_for_json_result():
+    from gws.contracts import PlannerResult
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text('{"result": "satisfied"}')
+    assert result is PlannerResult.SATISFIED
+
+
+def test_parse_synthesized_plan_text_returns_plan_with_result_field():
+    from gws.providers.common import parse_synthesized_plan_text
+
+    result = parse_synthesized_plan_text(
+        '{"result":"plan","title":"Build it","goal":"Make it work","repo":"repo-a",'
+        '"allowed_paths":["src/**"],"forbidden_paths":[],"work_type":"execute"}'
+    )
+    assert result.title == "Build it"
+    assert result.goal == "Make it work"
+
+
 def test_parse_synthesized_plan_text_returns_plan_for_json():
     from gws.providers.common import parse_synthesized_plan_text
 
