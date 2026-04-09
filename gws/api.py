@@ -145,7 +145,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         eligible_repo_heads: dict[str, str],
         repo_trees: dict[str, list[str]],
     ):
-        from .models import IntentVersion, Outcome, WorkItem, WorkItemStatus
+        from .models import IntentStatus, IntentVersion, Outcome, WorkItem, WorkItemStatus
         from .planner_client import build_planner_client
         from .policy import PolicyEngine
 
@@ -159,6 +159,9 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         else:
             intent = session.query(IntentVersion).order_by(IntentVersion.created_at.desc()).first()
         if intent is None:
+            return None
+        if intent.status is IntentStatus.SATISFIED:
+            logger.info("Skipping planning for %s — intent already satisfied", intent.intent_id)
             return None
 
         # Don't plan if there's already a READY (unstarted) work item for this intent.

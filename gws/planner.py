@@ -12,6 +12,8 @@ from sqlalchemy.orm import Session
 from .contracts import EvaluationResult, PlannerResult, SynthesizedPlan
 from .evaluator import RepoEvaluator, resolve_repo_path
 from .models import (
+    IntentStatus,
+    IntentVersion,
     Outcome,
     OutcomePhase,
     OutcomeResult,
@@ -61,6 +63,18 @@ class PlannerService:
         outcome.result_summary = str(message)
         outcome.completed_at = completed_at
         outcome.current_work_item_id = None
+
+    def _mark_intent_satisfied(self, *, intent_id: str, intent_version: int) -> None:
+        intent = (
+            self.session.query(IntentVersion)
+            .filter(
+                IntentVersion.intent_id == intent_id,
+                IntentVersion.intent_version == intent_version,
+            )
+            .first()
+        )
+        if intent is not None:
+            intent.status = IntentStatus.SATISFIED
 
     @staticmethod
     def _normalize_selected_repo(selected_repo: str, repo_heads: dict[str, str]) -> str:
@@ -227,6 +241,10 @@ class PlannerService:
                         "files_examined": evaluation.files_examined,
                     }
                     planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    self._mark_intent_satisfied(
+                        intent_id=planning_session.outcome.intent_id,
+                        intent_version=planning_session.outcome.intent_version,
+                    )
                     planning_session.outcome.phase = OutcomePhase.COMPLETED
                     planning_session.outcome.result = OutcomeResult.ABANDONED
                     planning_session.outcome.result_summary = "Intent already satisfied (evaluator)"
@@ -265,6 +283,10 @@ class PlannerService:
                     planning_session.plan_payload = {"result": raw_result.value}
                     planning_session.completed_at = datetime.now(timezone.utc).replace(tzinfo=None)
                     if raw_result is PlannerResult.SATISFIED:
+                        self._mark_intent_satisfied(
+                            intent_id=planning_session.outcome.intent_id,
+                            intent_version=planning_session.outcome.intent_version,
+                        )
                         planning_session.outcome.phase = OutcomePhase.COMPLETED
                         planning_session.outcome.result = OutcomeResult.ABANDONED
                         planning_session.outcome.result_summary = "Intent already satisfied"
