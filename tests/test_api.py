@@ -319,6 +319,67 @@ def test_worker_lease_skips_jit_planning_for_satisfied_intent(tmp_path, worker_r
     assert response.json() == {"detail": "No eligible work"}
 
 
+def test_worker_lease_recovers_stale_materializing_session(tmp_path, worker_registry_path):
+    from datetime import datetime, timedelta, timezone
+
+    from gws.models import IntentVersion, Outcome, OutcomePhase, PlanningSession, PlanningSessionStatus
+
+    database_path = tmp_path / "api.db"
+    settings = Settings(
+        database_url=f"sqlite+pysqlite:///{database_path}",
+        workers_path=str(worker_registry_path),
+        planner_provider="unknown",
+    )
+    session_factory, engine = make_session_factory(settings.database_url)
+    Base.metadata.create_all(engine)
+
+    with session_factory() as session:
+        session.add(IntentVersion(intent_id="intent-1", intent_version=1, brief_text="brief"))
+        outcome = Outcome(intent_id="intent-1", intent_version=1, title="", goal="", phase=OutcomePhase.PLANNING)
+        session.add(outcome)
+        session.flush()
+        planning = PlanningSession(
+            outcome_id=outcome.id,
+            worker_id="coder-1",
+            lane="coder",
+            status=PlanningSessionStatus.MATERIALIZING,
+            planner_provider="fake",
+            planner_model=None,
+            available_repos=["repo-a"],
+            repo_heads={"repo-a": "abc123"},
+            planning_context={},
+            plan_payload={},
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=5),
+        )
+        session.add(planning)
+        session.commit()
+        planning_id = planning.id
+        outcome_id = outcome.id
+
+    app = create_app(settings)
+    client = TestClient(app)
+
+    response = client.post(
+        "/worker/lease",
+        json={"ttl_seconds": 60, "intent_id": "intent-1", "repo_heads": {"repo-a": "abc123"}},
+        headers=auth_headers("token-coder-1"),
+    )
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Planning unavailable"}
+
+    with session_factory() as session:
+        stored_planning = session.get(PlanningSession, planning_id)
+        stored_outcome = session.get(Outcome, outcome_id)
+
+        assert stored_planning.status is PlanningSessionStatus.FAILED
+        assert stored_planning.completed_at is not None
+        assert stored_planning.error_detail == "planning session abandoned during materialization"
+        assert stored_outcome.phase is OutcomePhase.COMPLETED
+        assert stored_outcome.result.value == "failed"
+        assert stored_outcome.result_summary == "planning session abandoned during materialization"
+
+
 def test_worker_heartbeat_extends_deadline(tmp_path, worker_registry_path):
     from gws.control_plane import ControlPlaneService
     from gws.models import IntentVersion, Outcome, OutcomePhase, WorkItem, WorkItemStatus

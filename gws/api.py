@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timedelta, timezone
 
 from typing import Optional
 
@@ -219,6 +220,40 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
         finally:
             _intent_planning.pop(intent.intent_id, None)
 
+    def _recover_stale_planning_sessions(*, session, intent_id: str | None, stale_after_seconds: int = 180) -> int:
+        from .models import Outcome, OutcomePhase, OutcomeResult, PlanningSession, PlanningSessionStatus
+
+        stale_before = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=stale_after_seconds)
+        query = (
+            session.query(PlanningSession)
+            .join(Outcome, PlanningSession.outcome_id == Outcome.id)
+            .filter(
+                PlanningSession.status == PlanningSessionStatus.MATERIALIZING,
+                PlanningSession.completed_at.is_(None),
+                PlanningSession.created_at <= stale_before,
+            )
+        )
+        if intent_id:
+            query = query.filter(Outcome.intent_id == intent_id)
+
+        recovered = 0
+        recovered_at = datetime.now(timezone.utc).replace(tzinfo=None)
+        for planning_session in query.all():
+            planning_session.status = PlanningSessionStatus.FAILED
+            planning_session.completed_at = recovered_at
+            planning_session.error_detail = "planning session abandoned during materialization"
+            planning_session.outcome.phase = OutcomePhase.COMPLETED
+            planning_session.outcome.result = OutcomeResult.FAILED
+            planning_session.outcome.result_summary = "planning session abandoned during materialization"
+            planning_session.outcome.completed_at = recovered_at
+            planning_session.outcome.current_work_item_id = None
+            recovered += 1
+
+        if recovered:
+            session.commit()
+            logger.warning("Recovered %d stale materializing planning sessions", recovered)
+        return recovered
+
     async def _complete_work_item_for_worker(
         *,
         work_item_id: int,
@@ -260,6 +295,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
             from .models import Outcome, WorkItem, WorkItemStatus
 
             _control_plane(session).expire_leases()
+            _recover_stale_planning_sessions(session=session, intent_id=payload.intent_id)
 
             accessible_repos = list(worker.repo_access_set)
             eligible_repo_heads = {
