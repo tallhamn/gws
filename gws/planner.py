@@ -197,6 +197,10 @@ class PlannerService:
         if planning_session is None:
             raise ValueError(f"unknown planning_session_id: {planning_session_id}")
 
+        # Persist the claim before external evaluator/planner calls so SQLite does not
+        # hold a write transaction open across long-running model work.
+        self.session.commit()
+
         try:
             context = planning_session.planning_context or {}
             repo_trees = dict(context.get("repo_trees", {}))

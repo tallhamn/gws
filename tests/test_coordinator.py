@@ -230,7 +230,7 @@ def test_coordinator_commits_success_state_and_event_together(session, monkeypat
         repo_heads={"repo-a": "abc123"},
     )
 
-    assert commit_calls["count"] == 2
+    assert commit_calls["count"] == 3
 
 
 def test_coordinator_records_failed_planning_session_and_event(session):

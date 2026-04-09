@@ -223,6 +223,50 @@ def test_issue_lease_rejects_non_positive_ttl_and_second_active_lease(session):
     session.rollback()
 
 
+def test_issue_lease_converts_lazy_load_integrity_error_into_active_lease_conflict(session, monkeypatch):
+    _, work_item = _outcome_with_work_item(session)
+
+    existing_lease = Lease(
+        work_item_id=work_item.id,
+        worker_id="worker-existing",
+        lane=work_item.lane,
+        issued_at=work_item.created_at,
+        heartbeat_deadline=work_item.created_at + timedelta(seconds=60),
+        expires_at=work_item.created_at + timedelta(seconds=60),
+        base_commit=work_item.base_commit,
+    )
+    session.add(existing_lease)
+    session.commit()
+
+    work_item.status = WorkItemStatus.READY
+    session.commit()
+    session.expunge_all()
+
+    real_query = session.query
+
+    class _NoActiveLeaseQuery:
+        def filter(self, *args, **kwargs):
+            return self
+
+        def with_for_update(self):
+            return self
+
+        def first(self):
+            return None
+
+    def fake_query(model, *args, **kwargs):
+        if model is Lease:
+            return _NoActiveLeaseQuery()
+        return real_query(model, *args, **kwargs)
+
+    monkeypatch.setattr(session, "query", fake_query)
+
+    service = ControlPlaneService(session)
+
+    with pytest.raises(ValueError, match="active lease"):
+        service.issue_lease(work_item_id=work_item.id, worker_id="worker-racing", ttl_seconds=60)
+
+
 def test_heartbeat_rejects_non_positive_ttl_and_attempt_status_rejects_invalid_values(session):
     intent = IntentVersion(intent_id="intent-1", intent_version=1, brief_text="ship /music")
     outcome = Outcome(

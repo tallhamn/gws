@@ -150,6 +150,7 @@ class ControlPlaneService:
             )
             raise ValueError(f"work item {work_item_id} is not ready for lease issuance")
 
+        outcome = work_item.outcome
         lease = Lease(
             work_item=work_item,
             worker_id=worker_id,
@@ -171,8 +172,8 @@ class ControlPlaneService:
         )
         self.session.add_all([lease, attempt])
         work_item.status = WorkItemStatus.LEASED
-        work_item.outcome.phase = OutcomePhase.RUNNING
-        work_item.outcome.current_work_item_id = work_item.id
+        outcome.phase = OutcomePhase.RUNNING
+        outcome.current_work_item_id = work_item.id
 
         try:
             self.session.commit()

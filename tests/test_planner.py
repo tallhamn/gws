@@ -1,9 +1,11 @@
+from pathlib import Path
 from typing import Optional
 
 from pydantic import ValidationError
 
 from gws.config import Settings
 from gws.contracts import SynthesizedPlan
+from gws.db import Base, make_session_factory
 from gws.gitops import changed_hunks
 from gws.models import (
     IntentVersion,
@@ -372,6 +374,56 @@ def test_planner_materialize_plan_is_single_shot(session):
         raise AssertionError("expected ValueError")
 
     assert session.query(WorkItem).count() == 1
+
+
+def test_planner_commits_materializing_state_before_external_work(tmp_path: Path):
+    database_path = tmp_path / "planner.db"
+    session_factory, engine = make_session_factory(f"sqlite+pysqlite:///{database_path}")
+    Base.metadata.create_all(engine)
+
+    session = session_factory()
+    try:
+        planning = _planning_session(session)
+        observed = {}
+
+        class InspectingPlannerClient:
+            def synthesize(
+                self,
+                *,
+                brief: str,
+                lane: str,
+                repo_heads: dict[str, str],
+                envelope: dict,
+                lane_capabilities: Optional[dict] = None,
+                intent_context: Optional[str] = None,
+                planner_guidance: Optional[str] = None,
+                repo_trees: dict[str, list[str]] | None = None,
+                evaluation_findings: Optional[str] = None,
+            ) -> dict:
+                del brief, lane, repo_heads, envelope, lane_capabilities, intent_context, planner_guidance
+                del repo_trees, evaluation_findings
+                probe = session_factory()
+                try:
+                    observed["status"] = probe.get(PlanningSession, planning.id).status
+                finally:
+                    probe.close()
+                return {
+                    "title": "Create /music endpoint",
+                    "goal": "Implement /music experience",
+                    "repo": "repo-a",
+                    "allowed_paths": ["services/**"],
+                    "forbidden_paths": ["infra/**"],
+                    "work_type": "execute",
+                }
+
+        planner = PlannerService(session, planner_client=InspectingPlannerClient())
+
+        planner.materialize_plan(planning.id)
+
+        assert observed["status"] is PlanningSessionStatus.MATERIALIZING
+    finally:
+        session.close()
+        engine.dispose()
 
 
 def test_planner_rejects_non_pending_planning_session_without_synthesizing(session):
