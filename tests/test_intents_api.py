@@ -75,6 +75,25 @@ def test_get_intent(client):
     assert data["brief_text"] == "Build a platformer"
     assert data["context"] == "Browser game."
     assert data["intent_version"] == 1
+    assert data["status"] == "active"
+
+
+def test_get_intent_includes_satisfied_status_after_completion(client):
+    client.post(
+        "/intents",
+        json={
+            "intent_id": "game-1",
+            "brief_text": "Build a platformer",
+        },
+    )
+
+    complete = client.post("/intents/game-1/complete")
+    assert complete.status_code == 200
+    assert complete.json()["status"] == "satisfied"
+
+    resp = client.get("/intents/game-1")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "satisfied"
 
 
 def test_get_intent_not_found(client):

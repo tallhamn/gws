@@ -501,6 +501,7 @@ def create_app(settings: Optional[Settings] = None) -> FastAPI:
                 "context": intent.context,
                 "planner_guidance": intent.planner_guidance,
                 "target_branch": intent.target_branch,
+                "status": intent.status.value,
             }
 
     @app.post("/intents/{intent_id}/complete")
