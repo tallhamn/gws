@@ -719,6 +719,67 @@ def test_planner_marks_intent_satisfied_when_planner_returns_satisfied(session):
     assert stored_outcome.result_summary == "Intent already satisfied"
 
 
+def test_planner_replans_empty_repo_when_model_claims_satisfied(session):
+    from gws.contracts import PlannerResult
+
+    class EmptyRepoPlanner:
+        def __init__(self):
+            self.calls: list[dict] = []
+
+        def synthesize(
+            self,
+            *,
+            brief: str,
+            lane: str,
+            repo_heads: dict[str, str],
+            envelope: dict,
+            lane_capabilities=None,
+            intent_context=None,
+            planner_guidance=None,
+            repo_trees=None,
+            evaluation_findings=None,
+        ):
+            self.calls.append(
+                {
+                    "planner_guidance": planner_guidance,
+                    "evaluation_findings": evaluation_findings,
+                    "repo_trees": dict(repo_trees or {}),
+                }
+            )
+            if len(self.calls) == 1:
+                return PlannerResult.SATISFIED
+            return {
+                "title": "Scaffold first artifact",
+                "goal": "Create the first playable HTML artifact",
+                "description": "Start the drop from an empty repo tree.",
+                "repo": "repo-a",
+                "allowed_paths": ["drops/**"],
+                "forbidden_paths": [],
+                "work_type": "execute",
+            }
+
+    planning = _planning_session(
+        session,
+        planning_context={
+            "brief": "ship /music",
+            "envelope": {"max_runtime": 900},
+            "intent_context": "music domain",
+            "planner_guidance": "prefer minimal changes",
+            "repo_trees": {"repo-a": []},
+        },
+    )
+    planner_client = EmptyRepoPlanner()
+    planner = PlannerService(session, planner_client=planner_client)
+
+    outcome, work_item = planner.materialize_plan(planning.id)
+
+    assert outcome.selected_repo == "repo-a"
+    assert work_item.repo == "repo-a"
+    assert len(planner_client.calls) == 2
+    assert "must return a work plan" in planner_client.calls[1]["planner_guidance"].lower()
+    assert "repo tree is empty" in planner_client.calls[1]["evaluation_findings"].lower()
+
+
 def test_planner_skips_duplicate_active_outcome_for_same_intent_and_repo(session):
     from gws.contracts import PlannerResult
 

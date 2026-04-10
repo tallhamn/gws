@@ -190,6 +190,45 @@ class PlannerService:
             logger.exception("Evaluator failed for repo %s, falling back to synthesis-only", repo)
             return None
 
+    def _replan_empty_repo(
+        self,
+        *,
+        planning_session: PlanningSession,
+        brief: str,
+        envelope: dict,
+        repo_trees: dict[str, list[str]],
+        intent_context: Optional[str],
+        planner_guidance: Optional[str],
+        evaluation_findings: Optional[str],
+    ) -> SynthesizedPlan | PlannerResult | None:
+        forced_guidance = "\n".join(
+            part.strip()
+            for part in (
+                planner_guidance or "",
+                "Repo tree is empty. You MUST return a work plan to create the first artifact. Never return SATISFIED for an empty repo.",
+            )
+            if str(part or "").strip()
+        )
+        forced_findings = "\n".join(
+            part.strip()
+            for part in (
+                evaluation_findings or "",
+                "Repo tree is empty. No built artifact exists yet.",
+            )
+            if str(part or "").strip()
+        )
+        return self.planner_client.synthesize(
+            brief=brief,
+            lane=planning_session.lane,
+            repo_heads=dict(planning_session.repo_heads),
+            envelope=envelope,
+            lane_capabilities=self.lane_capabilities,
+            intent_context=intent_context,
+            planner_guidance=forced_guidance,
+            repo_trees=repo_trees,
+            evaluation_findings=forced_findings,
+        )
+
     def materialize_plan(self, planning_session_id: int) -> tuple[Outcome, WorkItem] | PlannerResult:
         claim_result = self.session.execute(
             update(PlanningSession)
@@ -273,10 +312,18 @@ class PlannerService:
                     if not all_files:
                         logger.warning(
                             "Planner returned SATISFIED but repo_trees is empty — "
-                            "overriding to force re-plan (session %d)",
+                            "forcing one re-plan (session %d)",
                             planning_session_id,
                         )
-                        raw_result = None  # fall through to re-raise as planning error
+                        raw_result = self._replan_empty_repo(
+                            planning_session=planning_session,
+                            brief=brief,
+                            envelope=envelope,
+                            repo_trees=repo_trees,
+                            intent_context=intent_context,
+                            planner_guidance=context.get("planner_guidance") or None,
+                            evaluation_findings=evaluation_findings,
+                        )
 
                 if isinstance(raw_result, PlannerResult):
                     planning_session.status = PlanningSessionStatus.SUCCEEDED
